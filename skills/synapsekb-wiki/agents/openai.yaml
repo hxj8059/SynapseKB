@@ -1,0 +1,4 @@
+interface:
+  display_name: "SynapseKB Wiki"
+  short_description: "Navigate private Wiki pages, sources, and local graphs."
+  default_prompt: "Use $synapsekb-wiki to inspect the authorized SynapseKB Wiki, follow source-backed relationships, and retain page and document provenance."

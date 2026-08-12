@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 40" fill="none">
+  <rect width="160" height="40" rx="10" fill="#111118"/>
+  <path d="M9 11c5-6 16-5.3 18 1.6 2 6.6-14.7 6.6-13 14.1 1.5 6.6 13 8.4 18 2" stroke="#8B72F5" stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="9" cy="11" r="3.5" fill="#8B72F5"/><circle cx="27" cy="12.6" r="3.2" fill="#31DCD7"/><circle cx="14" cy="26.7" r="3.2" fill="#8B72F5"/><circle cx="32" cy="28.7" r="3.5" fill="#31DCD7"/>
+  <text x="44" y="25.5" fill="#F4F3F8" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="650">SynapseKB</text>
+</svg>

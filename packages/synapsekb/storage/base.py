@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Protocol
+
+
+class ObjectStorage(Protocol):
+    async def put_file(self, key: str, path: Path, content_type: str) -> None: ...
+
+    async def read(self, key: str) -> bytes: ...
+
+    async def delete(self, key: str) -> None: ...
+
+    async def exists(self, key: str) -> bool: ...
+
+    def iter_bytes(self, key: str) -> AsyncIterator[bytes]: ...
+
+    async def presign_upload(
+        self, key: str, content_type: str, expires_seconds: int = 900
+    ) -> str | None: ...
+
+    async def presign_download(self, key: str, expires_seconds: int = 300) -> str | None: ...

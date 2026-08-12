@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --canvas: #f7f7fa;
+  --sidebar: rgba(251, 251, 253, 0.94);
+  --surface: #ffffff;
+  --surface-hover: #f1f1f6;
+  --border: #e6e5ec;
+  --text: #191820;
+  --muted: #747381;
+  --brand: #7254e8;
+  --brand-strong: #6040d5;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --canvas: #0f0f14;
+  --sidebar: rgba(17, 17, 24, 0.96);
+  --surface: #18181f;
+  --surface-hover: #22222c;
+  --border: #2a2934;
+  --text: #f1f0f6;
+  --muted: #9695a4;
+  --brand: #8065ef;
+  --brand-strong: #9279f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  margin: 1.5rem 0 0.65rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 1.5rem;
+}
+
+.markdown-content h2 {
+  font-size: 1.25rem;
+}
+
+.markdown-content h3 {
+  font-size: 1.08rem;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote {
+  margin: 0.75rem 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.5rem;
+}
+
+.markdown-content ul {
+  list-style: disc;
+}
+
+.markdown-content ol {
+  list-style: decimal;
+}
+
+.markdown-content a {
+  color: #7c5cff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown-content :not(pre) > code {
+  border-radius: 0.35rem;
+  background: var(--surface-hover);
+  padding: 0.12rem 0.35rem;
+  font-size: 0.86em;
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid #7c5cff;
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+.synapse-select-content {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  scrollbar-color: color-mix(in srgb, var(--muted) 32%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.synapse-select-content[data-state="open"] {
+  animation: synapse-select-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes synapse-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  accent-color: var(--brand);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(114, 84, 232, 0.24);
+}

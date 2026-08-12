@@ -1,0 +1,4 @@
+interface:
+  display_name: "SynapseKB Shared"
+  short_description: "Authenticate, scope, and safely operate SynapseKB MCP."
+  default_prompt: "Use $synapsekb-shared to configure a safe SynapseKB MCP workflow, select authorized knowledge bases, and preserve citations."

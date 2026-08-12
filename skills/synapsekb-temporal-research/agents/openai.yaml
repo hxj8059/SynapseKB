@@ -1,0 +1,4 @@
+interface:
+  display_name: "SynapseKB Temporal Research"
+  short_description: "Resolve time ranges and compare periods with evidence."
+  default_prompt: "Use $synapsekb-temporal-research to resolve the user's dates, run independent time-filtered retrieval, and cite both sides of every comparison."

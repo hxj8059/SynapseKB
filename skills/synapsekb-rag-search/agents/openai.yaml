@@ -1,0 +1,4 @@
+interface:
+  display_name: "SynapseKB RAG Search"
+  short_description: "Search and answer from SynapseKB with strict filters."
+  default_prompt: "Use $synapsekb-rag-search to search authorized SynapseKB knowledge bases with structured filters and return verifiable citations."
