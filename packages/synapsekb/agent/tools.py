@@ -193,15 +193,17 @@ async def _search(
             )
         ).all()
     )
-    embedding_ids = {item.embedding_model_id for item in knowledge_bases}
-    if len(embedding_ids) > 1:
-        raise ValueError("Agent 知识库使用了不同 Embedding 模型")
+    embedding_configs = {
+        (item.embedding_model_id, item.embedding_dimensions) for item in knowledge_bases
+    }
+    if len(embedding_configs) > 1:
+        raise ValueError("Agent 知识库使用了不同 Embedding 模型或维度")
     query_vector = None
-    model_id = next(iter(embedding_ids), None)
+    model_id, embedding_dimensions = next(iter(embedding_configs), (None, None))
     if model_id:
         model = await context.session.get(ProviderModel, model_id)
         if model:
-            provider = create_provider(model)
+            provider = create_provider(model, embedding_dimensions=embedding_dimensions)
             try:
                 query_vector = (await provider.embeddings([query]))[0]
             finally:
@@ -218,6 +220,7 @@ async def _search(
         context.session,
         request,
         query_vector=query_vector,
+        embedding_dimensions=embedding_dimensions,
     )
     results = await rerank_or_trim(
         context.session,

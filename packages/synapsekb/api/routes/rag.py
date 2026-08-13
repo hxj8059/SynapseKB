@@ -39,12 +39,14 @@ async def _resolve_models(
     knowledge_bases: list[KnowledgeBase],
     chat_model_id: uuid.UUID | None,
     session: DatabaseSession,
-) -> tuple[ProviderModel | None, ProviderModel, uuid.UUID | None, int]:
-    embedding_ids = {item.embedding_model_id for item in knowledge_bases}
-    if len(embedding_ids) > 1:
-        raise HTTPException(status_code=409, detail="所选知识库的 Embedding 模型不一致")
+) -> tuple[ProviderModel | None, int | None, ProviderModel, uuid.UUID | None, int]:
+    embedding_configs = {
+        (item.embedding_model_id, item.embedding_dimensions) for item in knowledge_bases
+    }
+    if len(embedding_configs) > 1:
+        raise HTTPException(status_code=409, detail="所选知识库的 Embedding 模型或维度不一致")
     embedding_model = None
-    embedding_id = next(iter(embedding_ids), None)
+    embedding_id, embedding_dimensions = next(iter(embedding_configs), (None, None))
     if embedding_id:
         embedding_model = await session.get(ProviderModel, embedding_id)
     configured_chat_ids = {item.rag_chat_model_id for item in knowledge_bases}
@@ -88,7 +90,7 @@ async def _resolve_models(
         raise HTTPException(status_code=409, detail="所选知识库的 Rerank 模型不一致")
     rerank_model_id = next(iter(rerank_ids), None)
     max_output_tokens = min(item.rag_max_output_tokens for item in knowledge_bases)
-    return embedding_model, chat_model, rerank_model_id, max_output_tokens
+    return embedding_model, embedding_dimensions, chat_model, rerank_model_id, max_output_tokens
 
 
 async def _stream_answer(
@@ -96,6 +98,7 @@ async def _stream_answer(
     payload: RagRequest,
     session_id: uuid.UUID,
     embedding_model_id: uuid.UUID | None,
+    embedding_dimensions: int | None,
     chat_model_id: uuid.UUID,
     rerank_model_id: uuid.UUID | None,
     max_output_tokens: int,
@@ -108,7 +111,10 @@ async def _stream_answer(
         )
         query_vector = None
         if embedding_model:
-            embedding_provider = create_provider(embedding_model)
+            embedding_provider = create_provider(
+                embedding_model,
+                embedding_dimensions=embedding_dimensions,
+            )
             try:
                 query_vector = (await embedding_provider.embeddings([payload.query]))[0]
             finally:
@@ -132,6 +138,7 @@ async def _stream_answer(
                 session,
                 request,
                 query_vector=query_vector,
+                embedding_dimensions=embedding_dimensions,
             )
             citations.extend(
                 await rerank_or_trim(
@@ -291,11 +298,13 @@ async def rag_stream(
         await require_knowledge_base_access(session, user, item)
         for item in set(payload.knowledge_base_ids)
     ]
-    embedding_model, chat_model, rerank_model_id, max_output_tokens = await _resolve_models(
-        knowledge_bases,
-        payload.chat_model_id,
-        session,
-    )
+    (
+        embedding_model,
+        embedding_dimensions,
+        chat_model,
+        rerank_model_id,
+        max_output_tokens,
+    ) = await _resolve_models(knowledge_bases, payload.chat_model_id, session)
     if payload.session_id:
         chat_session = await session.scalar(
             select(ChatSession).where(
@@ -332,6 +341,7 @@ async def rag_stream(
             payload=payload,
             session_id=chat_session.id,
             embedding_model_id=embedding_model.id if embedding_model else None,
+            embedding_dimensions=embedding_dimensions,
             chat_model_id=chat_model.id,
             rerank_model_id=rerank_model_id,
             max_output_tokens=max_output_tokens,

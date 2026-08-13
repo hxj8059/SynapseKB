@@ -6,7 +6,8 @@ import uuid
 from dataclasses import dataclass
 
 import structlog
-from sqlalchemy import delete, func, select
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import cast, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,8 +168,6 @@ async def ensure_page_node_embeddings(
     model = await session.get(ProviderModel, knowledge_base.embedding_model_id)
     if model is None or model.kind != "embedding" or not model.is_enabled:
         return 0, "知识库 Embedding 模型不存在或已停用"
-    if model.embedding_dimensions not in {None, 1536}:
-        return 0, "Wiki 节点向量索引固定为 1536 维，当前 Embedding 模型维度不兼容"
     pending_pages = [
         page
         for page in pages
@@ -180,7 +179,10 @@ async def ensure_page_node_embeddings(
     ]
     if not pending_pages:
         return 0, None
-    provider = create_provider(model)
+    provider = create_provider(
+        model,
+        embedding_dimensions=knowledge_base.embedding_dimensions,
+    )
     try:
         vectors = await provider.embeddings(
             [f"{page.title}\n{page.summary[:800]}" for page in pending_pages]
@@ -189,8 +191,10 @@ async def ensure_page_node_embeddings(
         return 0, f"{type(exc).__name__}: {exc}"[:500]
     finally:
         await provider.close()
-    if any(len(vector) != 1536 for vector in vectors):
-        return 0, "Embedding API 返回维度不是 1536，未写入 Wiki 节点"
+    if any(len(vector) != knowledge_base.embedding_dimensions for vector in vectors):
+        return 0, (
+            f"Embedding API 返回维度与知识库锁定的 {knowledge_base.embedding_dimensions} 维不一致"
+        )
     for page, vector in zip(pending_pages, vectors, strict=True):
         page_nodes[page.id].embedding = vector
         page_nodes[page.id].embedding_model_id = model.id
@@ -230,11 +234,17 @@ class WikiHistoryResolver:
         session: AsyncSession,
         space_id: uuid.UUID,
         embedding_model: ProviderModel | None,
+        embedding_dimensions: int,
     ) -> None:
         self.session = session
         self.space_id = space_id
         self.embedding_model = embedding_model
-        self.provider = create_provider(embedding_model) if embedding_model is not None else None
+        self.embedding_dimensions = embedding_dimensions
+        self.provider = (
+            create_provider(embedding_model, embedding_dimensions=embedding_dimensions)
+            if embedding_model is not None
+            else None
+        )
 
     @classmethod
     async def create(
@@ -252,10 +262,9 @@ class WikiHistoryResolver:
             model is None
             or model.kind != "embedding"
             or not model.is_enabled
-            or model.embedding_dimensions not in {None, 1536}
         ):
             model = None
-        return cls(session, space_id, model)
+        return cls(session, space_id, model, knowledge_base.embedding_dimensions)
 
     async def close(self) -> None:
         if self.provider is not None:
@@ -299,8 +308,11 @@ class WikiHistoryResolver:
             embedding_model_id = self.embedding_model.id
             try:
                 vectors = await self.provider.embeddings([query_text])
-                if vectors and len(vectors[0]) == 1536:
-                    distance = WikiNode.embedding.cosine_distance(vectors[0])
+                if vectors and len(vectors[0]) == self.embedding_dimensions:
+                    distance = cast(
+                        WikiNode.embedding,
+                        Vector(self.embedding_dimensions),
+                    ).cosine_distance(vectors[0])
                     semantic_rows = (
                         await self.session.execute(
                             select(WikiNode.page_id, distance.label("distance"))
@@ -309,6 +321,8 @@ class WikiHistoryResolver:
                                 WikiNode.space_id == self.space_id,
                                 WikiNode.page_id.is_not(None),
                                 WikiNode.embedding.is_not(None),
+                                func.vector_dims(WikiNode.embedding)
+                                == self.embedding_dimensions,
                                 WikiNode.embedding_model_id == embedding_model_id,
                                 WikiPage.is_archived.is_(False),
                                 WikiPage.current_version_id.is_not(None),

@@ -98,6 +98,7 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     embedding_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("models.id", ondelete="SET NULL")
     )
+    embedding_dimensions: Mapped[int] = mapped_column(Integer, default=1536)
     rag_chat_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("models.id", ondelete="SET NULL"), index=True
     )
@@ -231,12 +232,6 @@ class Chunk(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "search_vector",
             postgresql_using="gin",
         ),
-        Index(
-            "ix_chunks_embedding_hnsw",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
     )
 
     knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
@@ -249,7 +244,7 @@ class Chunk(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text)
     search_text: Mapped[str] = mapped_column(Text)
     search_vector: Mapped[Any] = mapped_column(TSVECTOR)
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536))
+    embedding: Mapped[list[float]] = mapped_column(Vector())
     token_count: Mapped[int] = mapped_column(Integer)
     page_from: Mapped[int | None] = mapped_column(Integer)
     page_to: Mapped[int | None] = mapped_column(Integer)
@@ -473,7 +468,7 @@ class WikiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Uuid, ForeignKey("wiki_pages.id", ondelete="SET NULL")
     )
     source_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector())
     embedding_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("models.id", ondelete="SET NULL"), index=True
     )

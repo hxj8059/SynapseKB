@@ -21,6 +21,38 @@ from synapsekb.database.models import ProviderModel
 logger = structlog.get_logger()
 
 
+def normalize_model_base_url(kind: str, base_url: str) -> str:
+    """Accept either an API root or the full operation endpoint.
+
+    OpenAI-compatible clients append their own operation path. Vendor examples
+    commonly show the full ``/embeddings`` URL, which would otherwise become
+    ``/embeddings/embeddings``.
+    """
+
+    normalized = base_url.rstrip("/")
+    suffixes = {
+        "embedding": ("/embeddings",),
+        "rerank": ("/rerank", "/reranks"),
+        "chat": ("/chat/completions",),
+    }
+    for suffix in suffixes.get(kind, ()):
+        if normalized.lower().endswith(suffix):
+            return normalized[: -len(suffix)].rstrip("/")
+    return normalized
+
+
+def embedding_dimension_request_mode(model: ProviderModel) -> bool | None:
+    """Return True/False for an explicit choice, or None for auto detection."""
+
+    configured = model.config.get("embedding_send_dimensions")
+    if isinstance(configured, bool):
+        return configured
+    host = urlsplit(normalize_model_base_url(model.kind, model.base_url)).hostname or ""
+    if host.casefold() == "tokenhub.tencentmaas.com":
+        return False
+    return None
+
+
 def reasoning_disable_requested(extra_body: dict[str, Any]) -> bool:
     thinking = extra_body.get("thinking")
     return (
@@ -76,6 +108,8 @@ class OpenAICompatibleProvider:
         rerank_path: str = "/rerank",
         embedding_dimensions: int | None = None,
         embedding_batch_size: int = 64,
+        embedding_send_dimensions: bool | None = None,
+        embedding_encoding_format: str | None = None,
         chat_extra_body: dict[str, Any] | None = None,
     ) -> None:
         self.model_name = model_name
@@ -84,6 +118,8 @@ class OpenAICompatibleProvider:
         self.rerank_path = f"/{rerank_path.lstrip('/')}"
         self.embedding_dimensions = embedding_dimensions
         self.embedding_batch_size = embedding_batch_size
+        self.embedding_send_dimensions = embedding_send_dimensions
+        self.embedding_encoding_format = embedding_encoding_format
         self.chat_extra_body = dict(chat_extra_body or {})
         # Provider instances are request-scoped. Keeping the final stream
         # metadata here lets callers reject a truncated stream instead of
@@ -155,10 +191,35 @@ class OpenAICompatibleProvider:
                 "model": self.model_name,
                 "input": list(texts[start : start + self.embedding_batch_size]),
             }
-            if self.embedding_dimensions is not None:
+            if (
+                self.embedding_dimensions is not None
+                and self.embedding_send_dimensions is not False
+            ):
                 params["dimensions"] = self.embedding_dimensions
-            async with self.quota():
-                response = await self.client.embeddings.create(**params)
+            if self.embedding_encoding_format is not None:
+                params["encoding_format"] = self.embedding_encoding_format
+            for _attempt in range(3):
+                try:
+                    async with self.quota():
+                        response = await self.client.embeddings.create(**params)
+                    break
+                except Exception as exc:
+                    error_text = str(getattr(exc, "body", exc)).casefold()
+                    if (
+                        "dimensions" in params
+                        and self.embedding_send_dimensions is None
+                        and "dimension" in error_text
+                    ):
+                        params.pop("dimensions")
+                        self.embedding_send_dimensions = False
+                        continue
+                    if "encoding_format" in params and "encoding" in error_text:
+                        params.pop("encoding_format")
+                        self.embedding_encoding_format = None
+                        continue
+                    raise
+            else:  # pragma: no cover - loop always breaks or raises
+                raise RuntimeError("Embedding 参数兼容重试失败")
             vectors.extend(
                 item.embedding for item in sorted(response.data, key=lambda item: item.index)
             )
@@ -416,10 +477,16 @@ class DeterministicMockProvider:
         return None
 
 
-def create_provider(model: ProviderModel) -> OpenAICompatibleProvider | DeterministicMockProvider:
+def create_provider(
+    model: ProviderModel,
+    *,
+    embedding_dimensions: int | None = None,
+) -> OpenAICompatibleProvider | DeterministicMockProvider:
+    requested_dimensions = embedding_dimensions or model.embedding_dimensions
     if model.provider == "mock":
-        return DeterministicMockProvider(model.embedding_dimensions or 1536)
-    validate_model_transport(model.provider, model.base_url)
+        return DeterministicMockProvider(requested_dimensions or 1536)
+    base_url = normalize_model_base_url(model.kind, model.base_url)
+    validate_model_transport(model.provider, base_url)
     api_key = (
         decrypt_secret(model.encrypted_api_key, context=f"model:{model.name}")
         if model.encrypted_api_key
@@ -433,9 +500,16 @@ def create_provider(model: ProviderModel) -> OpenAICompatibleProvider | Determin
         model.provider,
         configured_chat_extra_body,
     )
+    embedding_send_dimensions = embedding_dimension_request_mode(model)
+    encoding_format_config = model.config.get("embedding_encoding_format")
+    embedding_encoding_format = (
+        str(encoding_format_config)
+        if isinstance(encoding_format_config, str) and encoding_format_config
+        else "float"
+    )
     return OpenAICompatibleProvider(
         api_key=api_key,
-        base_url=model.base_url,
+        base_url=base_url,
         model_name=model.model_name,
         timeout_seconds=model.timeout_seconds,
         max_concurrency=model.max_concurrency,
@@ -443,11 +517,13 @@ def create_provider(model: ProviderModel) -> OpenAICompatibleProvider | Determin
             model.config.get("rerank_path")
             or ("/reranks" if model.provider == "dashscope" else "/rerank")
         ),
-        embedding_dimensions=model.embedding_dimensions,
+        embedding_dimensions=requested_dimensions,
         embedding_batch_size=int(
             model.config.get("embedding_batch_size")
             or (20 if model.provider == "dashscope" else 64)
         ),
+        embedding_send_dimensions=embedding_send_dimensions,
+        embedding_encoding_format=embedding_encoding_format,
         chat_extra_body=chat_extra_body,
     )
 

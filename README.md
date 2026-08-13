@@ -26,12 +26,13 @@ docker compose up --build
 首次启动会执行数据库迁移。随后创建管理员：
 
 ```bash
-docker compose exec api synapsekb-admin create \
+docker compose exec api synapsekb-admin \
   --email admin@example.com \
   --name 管理员
 ```
 
-命令会安全地交互式读取密码。不要把密码写入命令行或 `.env`。
+命令会安全地交互式读取并确认密码。当前管理 CLI 只有一个操作，因此 Typer
+将其作为根命令执行，不需要添加 `create` 子命令。不要把密码写入命令行或 `.env`。
 
 ## 开发
 

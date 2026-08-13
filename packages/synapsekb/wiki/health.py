@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from sqlalchemy import and_, delete, func, or_, select, update
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import and_, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
@@ -896,7 +897,10 @@ async def _orphan_neighbor_candidates(
         if source_node is None:
             continue
         if source_node.embedding is not None:
-            distance = WikiNode.embedding.cosine_distance(source_node.embedding)
+            dimensions = len(source_node.embedding)
+            distance = cast(WikiNode.embedding, Vector(dimensions)).cosine_distance(
+                source_node.embedding
+            )
             rows = (
                 await session.execute(
                     select(WikiNode, WikiPage, distance.label("distance"))
@@ -906,6 +910,7 @@ async def _orphan_neighbor_candidates(
                         WikiNode.page_id.is_not(None),
                         WikiNode.id != source_node.id,
                         WikiNode.embedding.is_not(None),
+                        func.vector_dims(WikiNode.embedding) == dimensions,
                         WikiPage.is_archived.is_(False),
                         WikiPage.current_version_id.is_not(None),
                     )

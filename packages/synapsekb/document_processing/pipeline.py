@@ -167,7 +167,10 @@ async def process_document_job(job_id: uuid.UUID) -> str:
                 model = await session.get(ProviderModel, knowledge_base.embedding_model_id)
                 if model is None or model.kind != "embedding" or not model.is_enabled:
                     raise RuntimeError("Embedding 模型不可用")
-                provider = create_provider(model)
+                provider = create_provider(
+                    model,
+                    embedding_dimensions=knowledge_base.embedding_dimensions,
+                )
                 vectors: list[list[float]] = []
                 try:
                     for start in range(0, len(chunks), 64):
@@ -185,15 +188,12 @@ async def process_document_job(job_id: uuid.UUID) -> str:
                 finally:
                     await provider.close()
 
-                expected_dimensions = model.embedding_dimensions or 1536
+                expected_dimensions = knowledge_base.embedding_dimensions
                 if any(len(vector) != expected_dimensions for vector in vectors):
                     raise RuntimeError(
                         f"Embedding 维度不匹配，配置 {expected_dimensions}，实际 "
                         f"{len(vectors[0]) if vectors else 0}"
                     )
-                if expected_dimensions != 1536:
-                    raise RuntimeError("当前迁移固定为 1536 维，请先执行维度迁移")
-
                 await _check_cancelled(job_id)
                 await session.execute(delete(Chunk).where(Chunk.document_id == document.id))
                 for chunk, vector in zip(chunks, vectors, strict=True):

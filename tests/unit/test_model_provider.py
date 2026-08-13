@@ -10,6 +10,7 @@ from synapsekb.models.provider import (
     OpenAICompatibleProvider,
     create_provider,
     effective_chat_extra_body,
+    normalize_model_base_url,
     validate_model_transport,
 )
 
@@ -81,6 +82,59 @@ async def test_dashscope_rerank_uses_plural_compatible_endpoint() -> None:
     provider = create_provider(model)
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.rerank_path == "/reranks"
+    await provider.close()
+
+
+def test_full_operation_endpoint_is_normalized_to_api_root() -> None:
+    assert normalize_model_base_url(
+        "embedding",
+        "https://tokenhub.tencentmaas.com/v1/embeddings",
+    ) == "https://tokenhub.tencentmaas.com/v1"
+    assert normalize_model_base_url(
+        "chat",
+        "https://model.example/v1/chat/completions",
+    ) == "https://model.example/v1"
+
+
+async def test_tencent_embedding_uses_vendor_compatible_parameters() -> None:
+    model = ProviderModel(
+        name="tencent-embedding",
+        kind="embedding",
+        provider="openai-compatible",
+        base_url="https://tokenhub.tencentmaas.com/v1/embeddings",
+        model_name="kinfra-text-embedding-0.6b",
+        encrypted_api_key=None,
+        timeout_seconds=60,
+        max_concurrency=5,
+        embedding_dimensions=1024,
+        config={},
+    )
+    provider = create_provider(model)
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert str(provider.client.base_url) == "https://tokenhub.tencentmaas.com/v1/"
+    assert provider.embedding_send_dimensions is False
+    assert provider.embedding_encoding_format == "float"
+    await provider.close()
+
+
+async def test_dashscope_embedding_uses_knowledge_base_dimension() -> None:
+    model = ProviderModel(
+        name="dashscope-embedding",
+        kind="embedding",
+        provider="dashscope",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model_name="text-embedding-v4",
+        encrypted_api_key=None,
+        timeout_seconds=60,
+        max_concurrency=5,
+        embedding_dimensions=1536,
+        config={},
+    )
+    provider = create_provider(model, embedding_dimensions=1024)
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.embedding_dimensions == 1024
+    assert provider.embedding_send_dimensions is None
+    assert provider.embedding_encoding_format == "float"
     await provider.close()
 
 

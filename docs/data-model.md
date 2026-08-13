@@ -37,11 +37,12 @@
 
 ## Chunk 索引
 
-V1 为 1536 维向量：
+Chunk 使用可变维度 `vector` 存储，实际维度由所属知识库锁定：
 
 ```sql
-CREATE INDEX chunks_embedding_hnsw_idx
-ON chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX ix_chunks_embedding_1024_hnsw
+ON chunks USING hnsw ((embedding::vector(1024)) vector_cosine_ops)
+WHERE vector_dims(embedding) = 1024;
 
 CREATE INDEX chunks_search_vector_idx
 ON chunks USING gin (search_vector);

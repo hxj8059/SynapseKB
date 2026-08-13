@@ -98,7 +98,8 @@ class KnowledgeBaseCreate(BaseModel):
     description: str = Field(default="", max_length=5000)
     visibility: str = "users"
     member_ids: list[uuid.UUID] = Field(default_factory=list)
-    embedding_model_id: uuid.UUID | None = None
+    embedding_model_id: uuid.UUID
+    embedding_dimensions: int = Field(ge=1, le=2000)
     rag_chat_model_id: uuid.UUID | None = None
     rerank_model_id: uuid.UUID | None = None
     rag_max_output_tokens: int = Field(default=8000, ge=1000, le=32_000)
@@ -133,6 +134,7 @@ class KnowledgeBaseRead(ORMModel):
     description: str
     visibility: str
     embedding_model_id: uuid.UUID | None
+    embedding_dimensions: int
     rag_chat_model_id: uuid.UUID | None
     rerank_model_id: uuid.UUID | None
     rag_max_output_tokens: int
@@ -153,6 +155,7 @@ class KnowledgeBaseUpdate(BaseModel):
     visibility: str | None = None
     member_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)
     embedding_model_id: uuid.UUID | None = None
+    embedding_dimensions: int | None = Field(default=None, ge=1, le=2000)
     rag_chat_model_id: uuid.UUID | None = None
     rerank_model_id: uuid.UUID | None = None
     rag_max_output_tokens: int | None = Field(default=None, ge=1000, le=32_000)
@@ -209,6 +212,7 @@ class ModelRead(ORMModel):
 
 class ModelUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    provider: str | None = Field(default=None, min_length=1, max_length=32)
     base_url: HttpUrl | None = None
     model_name: str | None = Field(default=None, min_length=1, max_length=200)
     api_key: str | None = Field(default=None, max_length=1000)
@@ -216,6 +220,7 @@ class ModelUpdate(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=600)
     max_concurrency: int | None = Field(default=None, ge=1, le=100)
     embedding_dimensions: int | None = Field(default=None, ge=1, le=20000)
+    clear_embedding_dimensions: bool = False
     is_enabled: bool | None = None
     config: dict[str, Any] | None = None
 

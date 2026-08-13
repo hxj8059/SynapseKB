@@ -35,6 +35,11 @@ Agent 的中间工具调用会使用受限的单步配额，但最终答案使�
 请求超时、最大并发和 Embedding 维度。API Key 使用 AES-GCM 加密后写入
 PostgreSQL，响应和普通日志均不返回密钥。
 
+模型卡片支持连接测试、启停、编辑和删除。编辑时 API Key 留空表示保留原密钥，
+也可以明确替换或清除；模型类型创建后不可修改。删除前必须解除知识库和 Agent
+绑定，并结束使用该模型的 Wiki 任务；服务端会再次检查引用并返回具体占用位置，
+不会只依赖前端确认或数据库级联删除。
+
 SynapseKB 允许在生产环境使用 HTTP 模型网关，适用于只在受信 VPC 或内网中
 可达的私有网关。系统会记录一条不含密钥、Prompt 和文档内容的安全警告，
 但不会拒绝模型配置或调用。如果请求会经过公网或不受信网络，仍建议在网关前
@@ -42,9 +47,16 @@ SynapseKB 允许在生产环境使用 HTTP 模型网关，适用于只在受信 
 
 DashScope 的 `qwen3-rerank` 使用单独的
 `https://dashscope.aliyuncs.com/compatible-api/v1` Base URL；管理页面在选择
-DashScope + Rerank 时会自动切换。`qwen3.7-text-embedding` 默认返回 1024 维，
-SynapseKB V1 配置为 1536 维并在请求中显式传递 `dimensions=1536`，以匹配数据库
-`vector(1536)`。DashScope Embedding 调用自动按单批最多 20 条拆分。
+DashScope + Rerank 时会自动切换。DashScope Embedding 支持由知识库选择输出维度，
+系统会把该知识库锁定的维度作为 `dimensions` 发送。Embedding 调用自动按单批最多
+20 条拆分。
+
+腾讯混元 MaaS 的模型示例通常给出完整的 `/v1/embeddings` Endpoint。模型设置页
+既接受该地址，也接受 API 根地址 `/v1`，系统会避免重复拼成
+`/embeddings/embeddings`。`tokenhub.tencentmaas.com` 的 Embedding 调用会自动发送
+`encoding_format=float`，且不发送该平台不支持的 `dimensions` 参数。连接测试会展示
+服务实际返回维度；例如 `kinfra-text-embedding-0.6b` 返回 1024 维，创建知识库时应选择
+该模型并将知识库锁定为 1024 维。
 
 ## 连接测试
 
@@ -55,9 +67,16 @@ SynapseKB V1 配置为 1536 维并在请求中显式传递 `dimensions=1536`，�
 - Embedding：生成向量并返回实际维度；
 - Rerank：对两段测试文本排序。
 
-知识库必须关联一个启用的 Embedding 模型后才能处理文档。当前首版迁移固定
-`vector(1536)`，配置其他维度会在写入前明确失败；切换维度需要专门迁移并重建
-HNSW 索引。
+模型测试失败时，管理员页面会显示经过脱敏的厂商 HTTP 状态、错误码、中英文摘要、
+Request ID 和请求路径；不会返回 API Key、Authorization Header 或测试文本。
+
+知识库创建时必须选择启用的 Embedding 模型和 1～2000 的维度。两者创建后锁定，避免
+已写入向量与新查询向量不一致。不同知识库可以使用不同模型和维度；常见维度使用
+pgvector 表达式 HNSW 索引，其他维度仍可精确检索，并可按运维文档在线补建索引。
+
+Embedding 的 `dimensions` 请求参数有三种策略：自动兼容（默认）、始终发送、从不发送。
+自动模式会先按知识库维度请求；若兼容接口明确拒绝该参数，则自动去掉后重试，并继续
+校验实际返回维度。固定输出模型建议将模型默认维度填为实际维度。
 
 每个知识库必须显式选择上表中需要的模型。Wiki 任务在入队时把选择固化到
 `wiki_update_jobs.model_id` 或 `wiki_health_jobs.model_id`，所以修改知识库设置不会偷偷

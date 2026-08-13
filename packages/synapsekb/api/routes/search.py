@@ -26,13 +26,15 @@ async def knowledge_search(
         knowledge_bases.append(
             await require_knowledge_base_access(session, user, knowledge_base_id)
         )
-    model_ids = {item.embedding_model_id for item in knowledge_bases}
-    if len(model_ids) > 1:
+    embedding_configs = {
+        (item.embedding_model_id, item.embedding_dimensions) for item in knowledge_bases
+    }
+    if len(embedding_configs) > 1:
         raise HTTPException(
             status_code=409,
-            detail="所选知识库使用不同 Embedding 模型，不能在同一次向量检索中混用",
+            detail="所选知识库使用不同 Embedding 模型或维度，不能在同一次向量检索中混用",
         )
-    model_id = next(iter(model_ids), None)
+    model_id, embedding_dimensions = next(iter(embedding_configs), (None, None))
     query_vector: list[float] | None = None
     if model_id is not None:
         model = await session.scalar(
@@ -44,7 +46,7 @@ async def knowledge_search(
         )
         if model is None:
             raise HTTPException(status_code=409, detail="Embedding 模型不可用")
-        provider = create_provider(model)
+        provider = create_provider(model, embedding_dimensions=embedding_dimensions)
         try:
             query_vector = (await provider.embeddings([payload.query]))[0]
         finally:
@@ -60,6 +62,7 @@ async def knowledge_search(
         session,
         candidate_request,
         query_vector=query_vector,
+        embedding_dimensions=embedding_dimensions,
     )
     rerank_model_ids = {item.rerank_model_id for item in knowledge_bases}
     if len(rerank_model_ids) > 1:

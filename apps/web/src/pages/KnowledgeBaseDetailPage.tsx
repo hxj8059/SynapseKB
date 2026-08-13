@@ -86,6 +86,7 @@ export function KnowledgeBaseDetailPage() {
             .filter(Boolean),
           wiki_generation_prompt: wikiGenerationPrompt,
           embedding_model_id: embeddingModelId || null,
+          embedding_dimensions: knowledgeBase?.embedding_dimensions,
           rag_chat_model_id: ragChatModelId || null,
           rerank_model_id: rerankModelId || null,
           rag_max_output_tokens: ragMaxOutputTokens,
@@ -168,7 +169,7 @@ export function KnowledgeBaseDetailPage() {
           <div>
             <h2 className="font-semibold">模块模型与 Wiki 配置</h2>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-              问答、Agent、Wiki 生成和 Wiki 健康检查互不抢占模型选择；Agent 模型在 Agent 配置中单独指定。
+              Embedding 模型与维度在创建知识库时锁定；问答、Agent、Wiki 生成和 Wiki 健康检查可独立选择模型。
             </p>
           </div>
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -182,7 +183,11 @@ export function KnowledgeBaseDetailPage() {
                 options={models
                   .filter((model) => model.kind === "embedding" && model.is_enabled)
                   .map((model) => ({ value: model.id, label: model.name, description: model.model_name }))}
+                disabled
               />
+              <span className="mt-1 block text-xs text-[var(--muted)]">
+                已锁定为 {knowledgeBase.embedding_dimensions} 维
+              </span>
             </label>
             <label className="text-sm">
               <span className="mb-1.5 block font-medium">RAG 问答 Chat</span>

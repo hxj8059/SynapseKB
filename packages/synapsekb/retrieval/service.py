@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, func, literal, select
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import ColumnElement, Select, cast, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapsekb.api.schemas import CitationRead, SearchRequest
@@ -44,6 +45,8 @@ class HybridRetriever:
         self,
         request: SearchRequest,
         query_vector: list[float] | None,
+        *,
+        embedding_dimensions: int | None = None,
     ) -> Select[tuple[Chunk, Document, Any]]:
         filters = self._base_filters(request)
         keyword_query = func.plainto_tsquery("simple", tokenize_for_postgres(request.query))
@@ -61,13 +64,19 @@ class HybridRetriever:
         )
 
         if query_vector is not None:
-            distance = Chunk.embedding.cosine_distance(query_vector)
+            dimensions = embedding_dimensions or len(query_vector)
+            if len(query_vector) != dimensions:
+                raise ValueError(
+                    f"查询向量维度 {len(query_vector)} 与知识库维度 {dimensions} 不一致"
+                )
+            typed_embedding = cast(Chunk.embedding, Vector(dimensions))
+            distance = typed_embedding.cosine_distance(query_vector)
             vector = (
                 select(
                     Chunk.id.label("chunk_id"),
                     func.row_number().over(order_by=distance).label("rank"),
                 )
-                .where(*filters)
+                .where(*filters, func.vector_dims(Chunk.embedding) == dimensions)
                 .order_by(distance)
                 .limit(self.vector_candidates)
                 .cte("vector")
@@ -104,8 +113,17 @@ class HybridRetriever:
         request: SearchRequest,
         *,
         query_vector: list[float] | None,
+        embedding_dimensions: int | None = None,
     ) -> list[CitationRead]:
-        rows = (await session.execute(self.build_query(request, query_vector))).all()
+        rows = (
+            await session.execute(
+                self.build_query(
+                    request,
+                    query_vector,
+                    embedding_dimensions=embedding_dimensions,
+                )
+            )
+        ).all()
         return [
             CitationRead(
                 citation_number=index,

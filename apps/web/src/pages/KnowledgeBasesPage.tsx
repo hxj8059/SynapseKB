@@ -19,6 +19,7 @@ export function KnowledgeBasesPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [embeddingModelId, setEmbeddingModelId] = useState("");
+  const [embeddingDimensions, setEmbeddingDimensions] = useState("");
   const [ragChatModelId, setRagChatModelId] = useState("");
   const [rerankModelId, setRerankModelId] = useState("");
   const [wikiChatModelId, setWikiChatModelId] = useState("");
@@ -51,6 +52,7 @@ export function KnowledgeBasesPage() {
           visibility,
           member_ids: visibility === "users" ? memberIds : [],
           embedding_model_id: embeddingModelId || null,
+          embedding_dimensions: Number(embeddingDimensions),
           rag_chat_model_id: ragChatModelId || null,
           rerank_model_id: rerankModelId || null,
           rag_max_output_tokens: 8000,
@@ -69,6 +71,7 @@ export function KnowledgeBasesPage() {
       setName("");
       setDescription("");
       setEmbeddingModelId("");
+      setEmbeddingDimensions("");
       setRagChatModelId("");
       setRerankModelId("");
       setWikiChatModelId("");
@@ -109,7 +112,6 @@ export function KnowledgeBasesPage() {
               placeholder="知识库名称"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              required
             />
             <Input
               aria-label="知识库描述"
@@ -120,15 +122,33 @@ export function KnowledgeBasesPage() {
             <Select
               ariaLabel="Embedding 模型"
               value={embeddingModelId}
-              onValueChange={setEmbeddingModelId}
+              onValueChange={(modelId) => {
+                setEmbeddingModelId(modelId);
+                const selected = models.find((model) => model.id === modelId);
+                setEmbeddingDimensions(
+                  selected?.embedding_dimensions
+                    ? String(selected.embedding_dimensions)
+                    : "",
+                );
+              }}
               placeholder="选择 Embedding 模型"
               options={models
                 .filter((model) => model.kind === "embedding" && model.is_enabled)
                 .map((model) => ({
                   value: model.id,
                   label: model.name,
-                  description: model.model_name,
+                  description: `${model.model_name}${model.embedding_dimensions ? ` · 默认 ${model.embedding_dimensions} 维` : ""}`,
                 }))}
+            />
+            <Input
+              aria-label="Embedding 维度"
+              type="number"
+              min={1}
+              max={2000}
+              placeholder="Embedding 维度（创建后锁定）"
+              value={embeddingDimensions}
+              onChange={(event) => setEmbeddingDimensions(event.target.value)}
+              required
             />
             <Select
               ariaLabel="RAG 问答 Chat 模型"
@@ -236,6 +256,7 @@ export function KnowledgeBasesPage() {
               disabled={
                 create.isPending ||
                 !embeddingModelId ||
+                !embeddingDimensions ||
                 !ragChatModelId ||
                 !rerankModelId ||
                 !wikiChatModelId ||

@@ -21,6 +21,7 @@ export type KnowledgeBase = {
   description: string;
   visibility: "all" | "users";
   embedding_model_id: string | null;
+  embedding_dimensions: number;
   rag_chat_model_id: string | null;
   rerank_model_id: string | null;
   rag_max_output_tokens: number;
