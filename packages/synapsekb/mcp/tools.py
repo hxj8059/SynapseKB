@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.agent_runner.actors import execute_agent_run
 from apps.document_worker.actors import process_document
 from synapsekb.agent.tools import AgentToolContext, execute_tool
-from synapsekb.api.schemas import TimeFilter
+from synapsekb.api.schemas import CitationRead, TimeFilter
 from synapsekb.auth.policy import (
     knowledge_base_access_clause,
     require_knowledge_base_access,
@@ -43,6 +43,7 @@ from synapsekb.database.session import AsyncSessionFactory
 from synapsekb.document_processing.validation import validate_upload
 from synapsekb.mcp.auth import McpPrincipal, principal_var
 from synapsekb.models.provider import DeterministicMockProvider, create_provider
+from synapsekb.retrieval.context import build_citation_context
 from synapsekb.storage.factory import create_runtime_storage
 
 mcp = FastMCP(
@@ -481,11 +482,10 @@ async def rag_answer(
             await provider.close()
             raise ValueError("Mock Provider 不支持 RAG")
         citations = result["citations"]
-        context = "\n\n".join(
-            f"[{item['citation_number']}] {item['document_name']}\n"
-            f"source_time={item['source_time']}\n{item['original_text']}"
-            for item in citations
-        )[:60_000]
+        context = await build_citation_context(
+            session,
+            [CitationRead.model_validate(item) for item in citations],
+        )
         parts: list[str] = []
         try:
             async for delta in provider.chat_stream(

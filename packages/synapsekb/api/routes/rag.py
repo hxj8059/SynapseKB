@@ -24,7 +24,8 @@ from synapsekb.database.models import (
 )
 from synapsekb.database.session import AsyncSessionFactory
 from synapsekb.models.provider import DeterministicMockProvider, create_provider
-from synapsekb.retrieval.rerank import rerank_or_trim
+from synapsekb.retrieval.context import build_citation_context
+from synapsekb.retrieval.federated import federated_search
 from synapsekb.retrieval.service import HybridRetriever
 from synapsekb.temporal.parser import resolve_time_ranges
 
@@ -39,16 +40,7 @@ async def _resolve_models(
     knowledge_bases: list[KnowledgeBase],
     chat_model_id: uuid.UUID | None,
     session: DatabaseSession,
-) -> tuple[ProviderModel | None, int | None, ProviderModel, uuid.UUID | None, int]:
-    embedding_configs = {
-        (item.embedding_model_id, item.embedding_dimensions) for item in knowledge_bases
-    }
-    if len(embedding_configs) > 1:
-        raise HTTPException(status_code=409, detail="所选知识库的 Embedding 模型或维度不一致")
-    embedding_model = None
-    embedding_id, embedding_dimensions = next(iter(embedding_configs), (None, None))
-    if embedding_id:
-        embedding_model = await session.get(ProviderModel, embedding_id)
+) -> tuple[ProviderModel, int]:
     configured_chat_ids = {item.rag_chat_model_id for item in knowledge_bases}
     if chat_model_id:
         chat_model = await session.get(ProviderModel, chat_model_id)
@@ -85,40 +77,29 @@ async def _resolve_models(
             chat_model = available[0] if available else None
     if chat_model is None:
         raise HTTPException(status_code=409, detail="尚未配置可用 Chat 模型")
-    rerank_ids = {item.rerank_model_id for item in knowledge_bases}
-    if len(rerank_ids) > 1:
-        raise HTTPException(status_code=409, detail="所选知识库的 Rerank 模型不一致")
-    rerank_model_id = next(iter(rerank_ids), None)
     max_output_tokens = min(item.rag_max_output_tokens for item in knowledge_bases)
-    return embedding_model, embedding_dimensions, chat_model, rerank_model_id, max_output_tokens
+    return chat_model, max_output_tokens
 
 
 async def _stream_answer(
     *,
     payload: RagRequest,
     session_id: uuid.UUID,
-    embedding_model_id: uuid.UUID | None,
-    embedding_dimensions: int | None,
     chat_model_id: uuid.UUID,
-    rerank_model_id: uuid.UUID | None,
     max_output_tokens: int,
     filters: list[TimeFilter | None],
 ) -> AsyncIterator[str]:
     settings = get_settings()
     async with AsyncSessionFactory() as session:
-        embedding_model = (
-            await session.get(ProviderModel, embedding_model_id) if embedding_model_id else None
+        knowledge_bases = list(
+            (
+                await session.scalars(
+                    select(KnowledgeBase).where(
+                        KnowledgeBase.id.in_(payload.knowledge_base_ids)
+                    )
+                )
+            ).all()
         )
-        query_vector = None
-        if embedding_model:
-            embedding_provider = create_provider(
-                embedding_model,
-                embedding_dimensions=embedding_dimensions,
-            )
-            try:
-                query_vector = (await embedding_provider.embeddings([payload.query]))[0]
-            finally:
-                await embedding_provider.close()
         retriever = HybridRetriever(
             settings.retrieval_vector_candidates,
             settings.retrieval_keyword_candidates,
@@ -134,20 +115,12 @@ async def _stream_answer(
                 time_filter=time_filter,
                 top_k=min(payload.top_k * 3, 100),
             )
-            period_candidates = await retriever.search(
-                session,
-                request,
-                query_vector=query_vector,
-                embedding_dimensions=embedding_dimensions,
-            )
             citations.extend(
-                await rerank_or_trim(
+                await federated_search(
                     session,
-                    payload.query,
-                    period_candidates,
-                    payload.top_k,
-                    model_id=rerank_model_id,
-                    allow_default_model=False,
+                    request.model_copy(update={"top_k": payload.top_k}),
+                    knowledge_bases,
+                    retriever=retriever,
                 )
             )
         deduplicated = list({citation.chunk_id: citation for citation in citations}.values())
@@ -165,13 +138,7 @@ async def _stream_answer(
             },
         )
 
-        context = "\n\n".join(
-            f"[{item.citation_number}] 文档：{item.document_name}\n"
-            f"来源时间：{item.source_time or '未知'}\n"
-            f"章节：{item.section or '未标注'}\n"
-            f"内容：{item.original_text}"
-            for item in deduplicated
-        )[:60_000]
+        context = await build_citation_context(session, deduplicated)
         chat_model = await session.get(ProviderModel, chat_model_id)
         if chat_model is None:
             yield _sse("error", {"message": "Chat 模型已被删除"})
@@ -298,13 +265,9 @@ async def rag_stream(
         await require_knowledge_base_access(session, user, item)
         for item in set(payload.knowledge_base_ids)
     ]
-    (
-        embedding_model,
-        embedding_dimensions,
-        chat_model,
-        rerank_model_id,
-        max_output_tokens,
-    ) = await _resolve_models(knowledge_bases, payload.chat_model_id, session)
+    chat_model, max_output_tokens = await _resolve_models(
+        knowledge_bases, payload.chat_model_id, session
+    )
     if payload.session_id:
         chat_session = await session.scalar(
             select(ChatSession).where(
@@ -340,10 +303,7 @@ async def rag_stream(
         _stream_answer(
             payload=payload,
             session_id=chat_session.id,
-            embedding_model_id=embedding_model.id if embedding_model else None,
-            embedding_dimensions=embedding_dimensions,
             chat_model_id=chat_model.id,
-            rerank_model_id=rerank_model_id,
             max_output_tokens=max_output_tokens,
             filters=filters,
         ),

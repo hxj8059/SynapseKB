@@ -33,6 +33,8 @@ If the question requires several searches, historical comparison, Wiki graph tra
 4. Include a structured `time_filter` whenever time is mentioned.
 5. Keep the natural-language query focused on the subject. Do not use query text as a substitute for structured filters.
 
+Multiple knowledge bases may use different Embedding models or dimensions. Pass their IDs together when the user wants federated retrieval; SynapseKB searches compatible groups independently and merges the ranked results. Preserve each result's `knowledge_base_id` and `knowledge_base_name` so evidence is never attributed to the wrong knowledge base.
+
 Use this shape:
 
 ```json
@@ -72,6 +74,8 @@ Attach citation numbers to the claims they support. Include:
 - a document or preview link when the host exposes one.
 
 Do not cite a document merely because it was retrieved. Cite only evidence used in the answer.
+
+`knowledge_search` returns the matched chunks, not complete documents. `rag_answer` uses each matched chunk plus a small adjacent context window for synthesis, but keeps the matched chunk as the auditable citation. Use an Agent and `document_read` only when the task genuinely requires full-document reading; do not send every full document by default.
 
 ## Handle failure
 

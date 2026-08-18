@@ -51,7 +51,7 @@ from synapsekb.wiki.structured import (
 logger = structlog.get_logger()
 
 WIKI_GENERATION_MAX_TOKENS = 10_000
-WIKI_COMPACT_RETRY_MAX_TOKENS = 4_000
+WIKI_COMPACT_RETRY_MAX_TOKENS = 10_000
 WIKI_CHUNKS_PER_BATCH = 16
 WIKI_RECOVERY_CHUNKS_PER_BATCH = 4
 
@@ -155,6 +155,7 @@ async def _generate_document_graph(
             },
         ],
         max_tokens=(WIKI_COMPACT_RETRY_MAX_TOKENS if compact else WIKI_GENERATION_MAX_TOKENS),
+        disable_reasoning=True,
     )
     return parse_generated_wiki_graph(
         response,
@@ -302,6 +303,23 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                 cited_chunk_ids: set[uuid.UUID] = set()
                 for batch_index, chunks in enumerate(chunk_batches, 1):
                     batch_results: list[tuple[GeneratedWikiGraph, list[Chunk]]] = []
+                    job.change_summary = (
+                        f"正在分析文档 {document_index}/{len(documents)}：{document.title}；"
+                        f"材料批次 {batch_index}/{len(chunk_batches)}，正在结构化抽取"
+                    )
+                    job.quality_report = {
+                        **job.quality_report,
+                        "current_document": {
+                            "document_id": str(document.id),
+                            "document_title": document.title,
+                            "document_index": document_index,
+                            "document_count": len(documents),
+                            "batch_index": batch_index,
+                            "batch_count": len(chunk_batches),
+                            "attempt": "normal",
+                        },
+                    }
+                    await session.commit()
                     try:
                         generated = await _generate_document_graph(
                             provider,
@@ -314,6 +332,19 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                         )
                         batch_results.append((generated, chunks))
                     except Exception as first_exc:
+                        job.change_summary = (
+                            f"正在分析文档 {document_index}/{len(documents)}：{document.title}；"
+                            f"材料批次 {batch_index}/{len(chunk_batches)}，正在紧凑重试"
+                        )
+                        job.quality_report = {
+                            **job.quality_report,
+                            "current_document": {
+                                **job.quality_report.get("current_document", {}),
+                                "attempt": "compact_retry",
+                                "last_error": f"{type(first_exc).__name__}: {first_exc}"[:500],
+                            },
+                        }
+                        await session.commit()
                         try:
                             generated = await _generate_document_graph(
                                 provider,
@@ -341,6 +372,22 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                                 chunks,
                                 WIKI_RECOVERY_CHUNKS_PER_BATCH,
                             )
+                            job.change_summary = (
+                                f"正在分析文档 {document_index}/{len(documents)}："
+                                f"{document.title}；"
+                                f"材料批次 {batch_index}/{len(chunk_batches)}，"
+                                f"已缩小为 {len(recovery_batches)} 个子批次"
+                            )
+                            job.quality_report = {
+                                **job.quality_report,
+                                "current_document": {
+                                    **job.quality_report.get("current_document", {}),
+                                    "attempt": "recovery_batches",
+                                    "recovery_batch_count": len(recovery_batches),
+                                    "last_error": f"{type(retry_exc).__name__}: {retry_exc}"[:500],
+                                },
+                            }
+                            await session.commit()
                             try:
                                 for recovery_index, recovery_chunks in enumerate(
                                     recovery_batches,
@@ -360,7 +407,12 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                             except Exception as recovery_exc:
                                 raise RuntimeError(
                                     f"Wiki 文档《{document.title}》第 {batch_index} 个材料批次"
-                                    "在缩小到 4 个文本块后仍无法完成结构化抽取"
+                                    "在缩小到 4 个文本块后仍无法完成结构化抽取；"
+                                    f"首次：{type(first_exc).__name__}: {str(first_exc)[:180]}；"
+                                    f"紧凑重试：{type(retry_exc).__name__}: "
+                                    f"{str(retry_exc)[:180]}；"
+                                    f"最小批次：{type(recovery_exc).__name__}: "
+                                    f"{str(recovery_exc)[:180]}"
                                 ) from recovery_exc
                             document_recovery_batches += 1
                             recovered_batches.append(

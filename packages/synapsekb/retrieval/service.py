@@ -8,7 +8,7 @@ from sqlalchemy import ColumnElement, Select, cast, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapsekb.api.schemas import CitationRead, SearchRequest
-from synapsekb.database.models import Chunk, Document
+from synapsekb.database.models import Chunk, Document, KnowledgeBase
 from synapsekb.document_processing.keyword import tokenize_for_postgres
 from synapsekb.retrieval.filters import chunk_time_clause
 
@@ -47,7 +47,7 @@ class HybridRetriever:
         query_vector: list[float] | None,
         *,
         embedding_dimensions: int | None = None,
-    ) -> Select[tuple[Chunk, Document, Any]]:
+    ) -> Select[tuple[Chunk, Document, KnowledgeBase, Any]]:
         filters = self._base_filters(request)
         keyword_query = func.plainto_tsquery("simple", tokenize_for_postgres(request.query))
         keyword = (
@@ -88,8 +88,9 @@ class HybridRetriever:
                 1.0 / (self.rrf_k + vector.c.rank), 0.0
             )
             statement = (
-                select(Chunk, Document, score.label("score"))
+                select(Chunk, Document, KnowledgeBase, score.label("score"))
                 .join(Document, Document.id == Chunk.document_id)
+                .join(KnowledgeBase, KnowledgeBase.id == Chunk.knowledge_base_id)
                 .join(candidates, candidates.c.chunk_id == Chunk.id)
                 .outerjoin(keyword, keyword.c.chunk_id == Chunk.id)
                 .outerjoin(vector, vector.c.chunk_id == Chunk.id)
@@ -99,8 +100,9 @@ class HybridRetriever:
         else:
             score = 1.0 / (self.rrf_k + keyword.c.rank)
             statement = (
-                select(Chunk, Document, score.label("score"))
+                select(Chunk, Document, KnowledgeBase, score.label("score"))
                 .join(Document, Document.id == Chunk.document_id)
+                .join(KnowledgeBase, KnowledgeBase.id == Chunk.knowledge_base_id)
                 .join(keyword, keyword.c.chunk_id == Chunk.id)
                 .order_by(score.desc())
                 .limit(request.top_k)
@@ -129,6 +131,8 @@ class HybridRetriever:
                 citation_number=index,
                 chunk_id=chunk.id,
                 document_id=document.id,
+                knowledge_base_id=knowledge_base.id,
+                knowledge_base_name=knowledge_base.name,
                 document_name=document.title,
                 page_from=chunk.page_from,
                 page_to=chunk.page_to,
@@ -137,5 +141,5 @@ class HybridRetriever:
                 source_time=chunk.source_time,
                 score=float(score),
             )
-            for index, (chunk, document, score) in enumerate(rows, start=1)
+            for index, (chunk, document, knowledge_base, score) in enumerate(rows, start=1)
         ]

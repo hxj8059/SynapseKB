@@ -406,6 +406,7 @@ export function AgentsPage() {
                             <span className="line-clamp-2">{citation.document_name}</span>
                           </div>
                           <p className="mt-2 text-xs text-[var(--muted)]">
+                            {citation.knowledge_base_name ? `${citation.knowledge_base_name} · ` : ""}
                             {citation.page_from !== null ? `第 ${citation.page_from} 页 · ` : ""}
                             {citation.section || "未标注章节"} · {citation.source_time ? new Date(citation.source_time).toLocaleDateString("zh-CN") : "时间未知"}
                           </p>

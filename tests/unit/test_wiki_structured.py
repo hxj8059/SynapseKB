@@ -10,6 +10,7 @@ from synapsekb.wiki.entity_resolution import (
     wiki_label_aliases,
 )
 from synapsekb.wiki.generator import (
+    WIKI_COMPACT_RETRY_MAX_TOKENS,
     WIKI_GENERATION_MAX_TOKENS,
     _complete_chunk_batches,
     _evenly_sample,
@@ -46,6 +47,7 @@ def test_complete_wiki_batches_cover_every_chunk_once() -> None:
 
 def test_wiki_model_output_limits_allow_long_structured_results() -> None:
     assert WIKI_GENERATION_MAX_TOKENS == 10_000
+    assert WIKI_COMPACT_RETRY_MAX_TOKENS == 10_000
     assert WIKI_HEALTH_REVIEW_MAX_TOKENS == 8_000
 
 
@@ -87,6 +89,22 @@ def test_parse_generated_wiki_graph_normalizes_types_and_refs() -> None:
 
     assert graph.nodes[0].source_refs == [1, 2]
     assert graph.relations[0].source_refs == [2]
+
+
+def test_parse_generated_wiki_graph_accepts_safe_english_type_alias() -> None:
+    graph = parse_generated_wiki_graph(
+        """{
+          "nodes": [{
+            "key": "novo", "type": "company", "title": "Novo Nordisk",
+            "summary": "药企", "markdown": "# Novo Nordisk\\n\\n该公司的管线和处方数据。[1]",
+            "source_refs": [1]
+          }],
+          "relations": []
+        }""",
+        allowed_node_types=["管线", "公司"],
+    )
+
+    assert graph.nodes[0].node_type == "公司"
 
 
 def test_parse_generated_wiki_graph_allows_a_batch_without_stable_entities() -> None:

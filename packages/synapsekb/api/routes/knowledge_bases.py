@@ -4,18 +4,22 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import selectinload
 
 from synapsekb.api.schemas import (
     KnowledgeBaseCreate,
+    KnowledgeBaseOverview,
+    KnowledgeBaseOverviewItem,
     KnowledgeBaseRead,
     KnowledgeBaseUpdate,
+    RecentDocumentOverviewItem,
 )
 from synapsekb.auth.dependencies import CurrentUser, DatabaseSession
 from synapsekb.auth.policy import knowledge_base_access_clause, require_admin
 from synapsekb.database.models import (
     AuditLog,
+    Document,
     KnowledgeBase,
     KnowledgeBaseMember,
     ProviderModel,
@@ -132,6 +136,64 @@ async def list_knowledge_bases(
         .order_by(KnowledgeBase.updated_at.desc())
     )
     return list((await session.scalars(query)).all())
+
+
+@router.get("/overview", response_model=KnowledgeBaseOverview)
+async def knowledge_base_overview(
+    user: CurrentUser,
+    session: DatabaseSession,
+) -> KnowledgeBaseOverview:
+    access = knowledge_base_access_clause(user)
+    count_rows = (
+        await session.execute(
+            select(
+                KnowledgeBase,
+                func.count(Document.id).label("document_count"),
+                func.count(
+                    case((Document.status == "ready", Document.id), else_=None)
+                ).label("ready_document_count"),
+            )
+            .outerjoin(Document, Document.knowledge_base_id == KnowledgeBase.id)
+            .where(access)
+            .group_by(KnowledgeBase.id)
+            .order_by(KnowledgeBase.updated_at.desc())
+        )
+    ).all()
+    recent_rows = (
+        await session.execute(
+            select(Document, KnowledgeBase.name)
+            .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
+            .where(access)
+            .order_by(Document.created_at.desc(), Document.id.desc())
+            .limit(10)
+        )
+    ).all()
+    knowledge_bases = [
+        KnowledgeBaseOverviewItem(
+            id=item.id,
+            name=item.name,
+            description=item.description,
+            document_count=int(document_count),
+            ready_document_count=int(ready_document_count),
+        )
+        for item, document_count, ready_document_count in count_rows
+    ]
+    return KnowledgeBaseOverview(
+        knowledge_bases=knowledge_bases,
+        total_document_count=sum(item.document_count for item in knowledge_bases),
+        recent_documents=[
+            RecentDocumentOverviewItem(
+                id=document.id,
+                knowledge_base_id=document.knowledge_base_id,
+                knowledge_base_name=knowledge_base_name,
+                title=document.title,
+                status=document.status,
+                source_time=document.source_time,
+                created_at=document.created_at,
+            )
+            for document, knowledge_base_name in recent_rows
+        ],
+    )
 
 
 @router.post("", response_model=KnowledgeBaseRead, status_code=status.HTTP_201_CREATED)

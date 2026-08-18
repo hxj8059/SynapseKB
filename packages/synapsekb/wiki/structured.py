@@ -15,6 +15,35 @@ _DOCUMENT_FILENAME_TITLE = re.compile(
     flags=re.IGNORECASE,
 )
 
+_NODE_TYPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "company": ("公司", "企业", "个股"),
+    "corporation": ("公司", "企业", "个股"),
+    "stock": ("个股", "公司", "企业"),
+    "pipeline": ("管线",),
+    "indication": ("适应症",),
+    "target": ("靶点",),
+    "drug": ("药品", "药物"),
+    "medicine": ("药品", "药物"),
+    "product": ("产品", "产业主题"),
+    "industry": ("行业", "产业主题"),
+    "concept": ("概念", "产业主题"),
+}
+
+
+def _configured_node_type(value: str, allowed: dict[str, str]) -> str | None:
+    normalized = value.strip().casefold()
+    exact = allowed.get(normalized)
+    if exact is not None:
+        return exact
+    # Models sometimes return an English schema label even when the prompt
+    # lists Chinese domain labels. Accept only a small deterministic alias map;
+    # never invent or silently broaden a user-configured node taxonomy.
+    for candidate in _NODE_TYPE_ALIASES.get(normalized, ()):
+        configured = allowed.get(candidate.casefold())
+        if configured is not None:
+            return configured
+    return None
+
 WIKI_ENTITY_IDENTITY_RULES = """
 实体判定以“两个页面能否共用同一个稳定定义”为准，不以名称相似、上下游相关或
 内容相似为准。必须遵守以下规则：
@@ -136,7 +165,7 @@ def parse_generated_wiki_graph(
     allowed = {item.casefold(): item for item in allowed_node_types}
     keys: set[str] = set()
     for node in graph.nodes:
-        canonical_type = allowed.get(node.node_type.casefold())
+        canonical_type = _configured_node_type(node.node_type, allowed)
         if canonical_type is None:
             raise ValueError(f"模型返回了未配置的节点类型：{node.node_type}")
         node.node_type = canonical_type

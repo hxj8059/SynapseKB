@@ -16,7 +16,6 @@ from synapsekb.api.schemas import SearchRequest, TimeFilter
 from synapsekb.database.models import (
     Document,
     KnowledgeBase,
-    ProviderModel,
     User,
     WikiEdge,
     WikiNode,
@@ -26,9 +25,7 @@ from synapsekb.database.models import (
     WikiSpace,
 )
 from synapsekb.domain.enums import TimeField
-from synapsekb.models.provider import create_provider
-from synapsekb.retrieval.rerank import rerank_or_trim
-from synapsekb.retrieval.service import HybridRetriever
+from synapsekb.retrieval.federated import federated_search
 
 
 @dataclass(slots=True)
@@ -193,60 +190,24 @@ async def _search(
             )
         ).all()
     )
-    embedding_configs = {
-        (item.embedding_model_id, item.embedding_dimensions) for item in knowledge_bases
-    }
-    if len(embedding_configs) > 1:
-        raise ValueError("Agent 知识库使用了不同 Embedding 模型或维度")
-    query_vector = None
-    model_id, embedding_dimensions = next(iter(embedding_configs), (None, None))
-    if model_id:
-        model = await context.session.get(ProviderModel, model_id)
-        if model:
-            provider = create_provider(model, embedding_dimensions=embedding_dimensions)
-            try:
-                query_vector = (await provider.embeddings([query]))[0]
-            finally:
-                await provider.close()
     request = SearchRequest(
         query=query,
         knowledge_base_ids=context.knowledge_base_ids,
         document_ids=[uuid.UUID(item) for item in document_ids or []],
         tag_ids=[uuid.UUID(item) for item in tag_ids or []],
         time_filter=TimeFilter.model_validate(time_filter) if time_filter else None,
-        top_k=min(max(top_k, 1) * 3, 90),
+        top_k=min(max(top_k, 1), 30),
     )
-    candidates = await HybridRetriever().search(
+    results = await federated_search(
         context.session,
         request,
-        query_vector=query_vector,
-        embedding_dimensions=embedding_dimensions,
-    )
-    results = await rerank_or_trim(
-        context.session,
-        query,
-        candidates,
-        min(max(top_k, 1), 30),
-        model_id=_common_optional_model_id(
-            {item.rerank_model_id for item in knowledge_bases},
-            "Agent 知识库使用了不同 Rerank 模型",
-        ),
-        allow_default_model=False,
+        knowledge_bases,
     )
     return {
         "count": len(results),
         "time_filter": time_filter,
         "citations": [item.model_dump(mode="json") for item in results],
     }
-
-
-def _common_optional_model_id(
-    model_ids: set[uuid.UUID | None],
-    error_message: str,
-) -> uuid.UUID | None:
-    if len(model_ids) > 1:
-        raise ValueError(error_message)
-    return next(iter(model_ids), None)
 
 
 async def execute_tool(

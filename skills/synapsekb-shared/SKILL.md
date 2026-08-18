@@ -23,6 +23,9 @@ The normal remote endpoint is `https://<synapsekb-host>/mcp`. A local `synapsekb
 3. If two knowledge bases have similar names, present the matches and ask the user to choose.
 4. Never infer access to a knowledge base that `kb_list` does not return.
 5. Preserve any user-supplied `document_ids` and `tag_ids`.
+6. When the user intentionally selects several knowledge bases, pass every selected ID; do not concatenate names into the query. Results expose `knowledge_base_id` and `knowledge_base_name`, which must be retained in citations.
+
+An Agent has a fixed knowledge scope configured in SynapseKB. `agent_list` identifies the Agent to run; the server then intersects that Agent's configured knowledge bases with the calling user's App permissions. Do not assume that an Agent can see every knowledge base returned by `kb_list`.
 
 ## Choose the workflow
 

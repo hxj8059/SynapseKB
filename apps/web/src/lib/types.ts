@@ -120,6 +120,8 @@ export type SearchCitation = {
   citation_number: number;
   chunk_id: string;
   document_id: string;
+  knowledge_base_id: string;
+  knowledge_base_name: string;
   document_name: string;
   page_from: number | null;
   page_to: number | null;
@@ -127,6 +129,26 @@ export type SearchCitation = {
   original_text: string;
   source_time: string | null;
   score: number;
+};
+
+export type KnowledgeBaseOverview = {
+  knowledge_bases: Array<{
+    id: string;
+    name: string;
+    description: string;
+    document_count: number;
+    ready_document_count: number;
+  }>;
+  total_document_count: number;
+  recent_documents: Array<{
+    id: string;
+    knowledge_base_id: string;
+    knowledge_base_name: string;
+    title: string;
+    status: string;
+    source_time: string | null;
+    created_at: string;
+  }>;
 };
 
 export type ChatSession = {
@@ -222,6 +244,8 @@ export type AgentRun = {
     citation_number: number;
     chunk_id: string | null;
     document_id: string;
+    knowledge_base_id: string | null;
+    knowledge_base_name: string | null;
     document_name: string;
     page_from: number | null;
     page_to: number | null;

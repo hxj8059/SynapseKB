@@ -167,7 +167,8 @@ export function KnowledgeBasesPage() {
               ariaLabel="Rerank 模型"
               value={rerankModelId}
               onValueChange={setRerankModelId}
-              placeholder="选择 Rerank 模型"
+              placeholder="不使用 Rerank（可选）"
+              clearable
               options={models
                 .filter((model) => model.kind === "rerank" && model.is_enabled)
                 .map((model) => ({
@@ -258,7 +259,6 @@ export function KnowledgeBasesPage() {
                 !embeddingModelId ||
                 !embeddingDimensions ||
                 !ragChatModelId ||
-                !rerankModelId ||
                 !wikiChatModelId ||
                 !wikiHealthChatModelId ||
                 wikiNodeTypes.trim().length === 0 ||

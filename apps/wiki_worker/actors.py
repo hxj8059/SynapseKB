@@ -11,9 +11,10 @@ dramatiq.set_broker(broker)
 
 @dramatiq.actor(
     queue_name="wiki",
-    max_retries=2,
-    min_backoff=30_000,
-    max_backoff=120_000,
+    # The generator performs schema-aware compact and small-batch recovery.
+    # Retrying the whole document after it has been marked failed repeats every
+    # expensive model call and makes a deterministic error look "stuck".
+    max_retries=0,
     time_limit=3_600_000,
 )
 def generate_wiki(job_id: str) -> None:

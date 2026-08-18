@@ -121,6 +121,7 @@ class OpenAICompatibleProvider:
         self.embedding_send_dimensions = embedding_send_dimensions
         self.embedding_encoding_format = embedding_encoding_format
         self.chat_extra_body = dict(chat_extra_body or {})
+        self.base_url_host = (urlsplit(base_url).hostname or "").casefold()
         # Provider instances are request-scoped. Keeping the final stream
         # metadata here lets callers reject a truncated stream instead of
         # silently persisting it as a completed answer.
@@ -283,6 +284,7 @@ class OpenAICompatibleProvider:
         messages: Sequence[dict[str, str]],
         *,
         max_tokens: int,
+        disable_reasoning: bool = False,
     ) -> str:
         """Request a complete JSON object without exposing reasoning fields.
 
@@ -293,7 +295,11 @@ class OpenAICompatibleProvider:
         """
 
         started = time.perf_counter()
-        response = await self._request_chat_json(messages, max_tokens=max_tokens)
+        response = await self._request_chat_json(
+            messages,
+            max_tokens=max_tokens,
+            disable_reasoning=disable_reasoning,
+        )
         if not response.choices:
             raise RuntimeError("模型没有返回任何候选结果")
         choice = response.choices[0]
@@ -304,7 +310,8 @@ class OpenAICompatibleProvider:
         reasoning_tokens = getattr(completion_details, "reasoning_tokens", None)
         completion_tokens = getattr(response.usage, "completion_tokens", None)
         prompt_tokens = getattr(response.usage, "prompt_tokens", None)
-        disable_requested = reasoning_disable_requested(self.chat_extra_body)
+        request_extra_body = self._chat_json_extra_body(disable_reasoning)
+        disable_requested = reasoning_disable_requested(request_extra_body)
         logger.info(
             "model_call",
             operation="chat_json",
@@ -332,6 +339,7 @@ class OpenAICompatibleProvider:
         messages: Sequence[dict[str, str]],
         *,
         max_tokens: int,
+        disable_reasoning: bool = False,
     ) -> Any:
         async with self.quota():
             params: Any = {
@@ -340,9 +348,31 @@ class OpenAICompatibleProvider:
                 "max_tokens": max_tokens,
                 "response_format": {"type": "json_object"},
             }
-            if self.chat_extra_body:
-                params["extra_body"] = self.chat_extra_body
-            return await self.client.chat.completions.create(**params)
+            extra_body = self._chat_json_extra_body(disable_reasoning)
+            if extra_body:
+                params["extra_body"] = extra_body
+            # Wiki/health callers already implement schema-aware recovery. A
+            # client-level retry would repeat the same long structured prompt
+            # two more times before the smaller recovery batch can run.
+            client = (
+                self.client.with_options(max_retries=0)
+                if hasattr(self.client, "with_options")
+                else self.client
+            )
+            return await client.chat.completions.create(**params)
+
+    def _chat_json_extra_body(self, disable_reasoning: bool) -> dict[str, Any]:
+        extra_body = dict(self.chat_extra_body)
+        if not disable_reasoning or reasoning_disable_requested(extra_body):
+            return extra_body
+        if self.base_url_host == "tokenhub.tencentmaas.com":
+            # Tencent MaaS accepts the Anthropic-compatible thinking switch;
+            # unlike enable_thinking=false it actually removes reasoning tokens
+            # for DeepSeek structured-output requests.
+            extra_body["thinking"] = {"type": "disabled"}
+        elif self.base_url_host.endswith("dashscope.aliyuncs.com"):
+            extra_body["enable_thinking"] = False
+        return extra_body
 
     async def probe_chat_json(self) -> dict[str, Any]:
         """Check structured-output and reasoning-control behavior without logging content."""

@@ -371,6 +371,8 @@ class CitationRead(BaseModel):
     citation_number: int
     chunk_id: uuid.UUID
     document_id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    knowledge_base_name: str
     document_name: str
     page_from: int | None
     page_to: int | None
@@ -384,6 +386,30 @@ class SearchResponse(BaseModel):
     query: str
     time_filter: TimeFilter | None
     results: list[CitationRead]
+
+
+class KnowledgeBaseOverviewItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str
+    document_count: int
+    ready_document_count: int
+
+
+class RecentDocumentOverviewItem(BaseModel):
+    id: uuid.UUID
+    knowledge_base_id: uuid.UUID
+    knowledge_base_name: str
+    title: str
+    status: str
+    source_time: datetime | None
+    created_at: datetime
+
+
+class KnowledgeBaseOverview(BaseModel):
+    knowledge_bases: list[KnowledgeBaseOverviewItem]
+    total_document_count: int
+    recent_documents: list[RecentDocumentOverviewItem]
 
 
 class RagRequest(BaseModel):
@@ -522,6 +548,8 @@ class AgentCitationRead(BaseModel):
     citation_number: int
     chunk_id: uuid.UUID | None = None
     document_id: uuid.UUID
+    knowledge_base_id: uuid.UUID | None = None
+    knowledge_base_name: str | None = None
     document_name: str
     page_from: int | None = None
     page_to: int | None = None

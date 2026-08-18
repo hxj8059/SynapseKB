@@ -164,6 +164,29 @@ async def test_chat_json_requests_complete_json_response() -> None:
     await provider.http.aclose()
 
 
+async def test_tencent_structured_call_can_disable_reasoning_per_request() -> None:
+    provider = OpenAICompatibleProvider(
+        api_key="test",
+        base_url="https://tokenhub.tencentmaas.com/v1",
+        model_name="reasoning-model",
+    )
+    completions = FakeChatCompletions('{"ok":true}')
+    provider.client = cast(
+        Any,
+        SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+    )
+    provider.quota = no_model_quota  # type: ignore[method-assign]
+
+    await provider.chat_json(
+        [{"role": "user", "content": "输出 JSON"}],
+        max_tokens=10_000,
+        disable_reasoning=True,
+    )
+
+    assert completions.params["extra_body"] == {"thinking": {"type": "disabled"}}
+    await provider.http.aclose()
+
+
 async def test_chat_json_rejects_length_even_when_partial_content_exists() -> None:
     provider = OpenAICompatibleProvider(
         api_key="test",

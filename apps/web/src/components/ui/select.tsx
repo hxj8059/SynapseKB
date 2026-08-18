@@ -17,6 +17,7 @@ type SharedProps = {
   disabled?: boolean;
   className?: string;
   size?: "default" | "sm";
+  clearable?: boolean;
 };
 
 export const selectTriggerStyles =
@@ -85,6 +86,7 @@ export function Select({
   disabled,
   className,
   size = "default",
+  clearable = false,
 }: SharedProps & {
   value: string;
   onValueChange: (value: string) => void;
@@ -113,6 +115,17 @@ export function Select({
           collisionPadding={12}
           className={selectContentStyles}
         >
+          {clearable && value && (
+            <>
+              <DropdownMenu.Item
+                className={itemStyles}
+                onSelect={() => onValueChange("")}
+              >
+                <span className="font-medium text-[var(--muted)]">不使用（可选）</span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
+            </>
+          )}
           <DropdownMenu.RadioGroup value={value} onValueChange={onValueChange}>
             {options.map((option) => (
               <DropdownMenu.RadioItem
