@@ -14,6 +14,7 @@ import type {
   KnowledgeBase,
   SearchCitation,
 } from "../lib/types";
+import { createClientUuid } from "../lib/uuid";
 
 type TurnCitation = {
   citation_number: number;
@@ -111,7 +112,7 @@ export function ChatPage() {
     const text = query.trim();
     if (!text || knowledgeBaseIds.length === 0 || abort.current) return;
     setQuery("");
-    const turnId = crypto.randomUUID();
+    const turnId = createClientUuid();
     setTurns((items) => [
       ...items,
       {
