@@ -73,3 +73,17 @@ synapsekb-mcp
 共享 Skill 说明认证、权限和写操作确认；其他 Skill 分别约束原始检索/RAG 选择、
 跨时期独立检索以及 Wiki/局部图读取。客户端仍必须配置上面的 MCP Server，Skill
 本身不会保存访问令牌。
+
+登录 SynapseKB 后，也可以点击左侧栏底部 API Key 右侧的“Skill 安装”入口。页面提供
+四个独立 ZIP、合集 ZIP、当前部署对应的 MCP URL，以及 Codex 和 WorkBuddy 分平台安装步骤。
+下载接口需要 App 登录态，未认证用户不能获取 Skill 包。
+
+Codex 用户可以下载合集并解压到用户级目录：
+
+```bash
+mkdir -p "$HOME/.agents/skills"
+unzip synapsekb-skills.zip -d "$HOME/.agents/skills"
+```
+
+WorkBuddy 按单个 Skill 包导入：在“专家・技能・连接器”中选择“添加技能 → 上传技能”，
+逐个上传四个独立 ZIP。安装完成后仍需配置 Streamable HTTP MCP 和 Bearer Token。

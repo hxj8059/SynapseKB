@@ -22,6 +22,21 @@ function SelectHarness() {
   );
 }
 
+function ClearableSelectHarness() {
+  const [value, setValue] = useState("source_time");
+  return (
+    <Select
+      ariaLabel="可选时间字段"
+      value={value}
+      onValueChange={setValue}
+      options={options}
+      placeholder="不使用时间字段"
+      clearable
+      clearLabel="不使用时间字段"
+    />
+  );
+}
+
 function MultiSelectHarness() {
   const [value, setValue] = useState<string[]>(["source_time"]);
   return (
@@ -44,6 +59,18 @@ describe("Select", () => {
 
     expect(screen.getByRole("button", { name: "时间字段" })).toHaveTextContent(
       "created_at",
+    );
+  });
+
+  it("clears an optional single value", async () => {
+    const user = userEvent.setup();
+    render(<ClearableSelectHarness />);
+
+    await user.click(screen.getByRole("button", { name: "可选时间字段" }));
+    await user.click(screen.getByRole("menuitem", { name: "不使用时间字段" }));
+
+    expect(screen.getByRole("button", { name: "可选时间字段" })).toHaveTextContent(
+      "不使用时间字段",
     );
   });
 

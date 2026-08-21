@@ -6,17 +6,19 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
-from sqlalchemy import ColumnElement, and_, exists, or_, select, true
+from sqlalchemy import ColumnElement, and_, exists, func, or_, select, true
 
 from apps.agent_runner.actors import execute_agent_run
 from synapsekb.api.schemas import (
     AgentCreate,
     AgentRead,
     AgentRunCreate,
+    AgentRunHistoryRead,
     AgentRunRead,
+    AgentRunSummaryRead,
     AgentRuntimeUpdate,
 )
 from synapsekb.auth.dependencies import CurrentUser, DatabaseSession
@@ -232,6 +234,54 @@ async def start_agent_run(
     await session.commit()
     execute_agent_run.send(str(run.id))
     return run
+
+
+@router.get("/{agent_id}/runs", response_model=AgentRunHistoryRead)
+async def list_agent_runs(
+    agent_id: uuid.UUID,
+    user: CurrentUser,
+    session: DatabaseSession,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> AgentRunHistoryRead:
+    """List the current user's runs without loading full answers or citations."""
+
+    await _get_accessible_agent(session, user, agent_id)
+    filters = (
+        AgentRun.agent_id == agent_id,
+        AgentRun.user_id == user.id,
+    )
+    total = int(
+        await session.scalar(
+            select(func.count()).select_from(AgentRun).where(*filters)
+        )
+        or 0
+    )
+    rows = (
+        await session.execute(
+            select(
+                AgentRun.id,
+                AgentRun.agent_id,
+                AgentRun.status,
+                AgentRun.query,
+                AgentRun.error_summary,
+                AgentRun.started_at,
+                AgentRun.finished_at,
+                AgentRun.created_at,
+                AgentRun.updated_at,
+            )
+            .where(*filters)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).mappings()
+    return AgentRunHistoryRead(
+        items=[AgentRunSummaryRead.model_validate(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 async def _get_run(

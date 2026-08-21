@@ -208,6 +208,8 @@ export function KnowledgeBaseDetailPage() {
                 value={rerankModelId}
                 onValueChange={setRerankModelId}
                 placeholder="不使用 Rerank"
+                clearable
+                clearLabel="不使用 Rerank"
                 options={models
                   .filter((model) => model.kind === "rerank" && model.is_enabled)
                   .map((model) => ({ value: model.id, label: model.name, description: model.model_name }))}

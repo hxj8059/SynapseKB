@@ -169,6 +169,7 @@ export function KnowledgeBasesPage() {
               onValueChange={setRerankModelId}
               placeholder="不使用 Rerank（可选）"
               clearable
+              clearLabel="不使用 Rerank"
               options={models
                 .filter((model) => model.kind === "rerank" && model.is_enabled)
                 .map((model) => ({

@@ -18,6 +18,7 @@ type SharedProps = {
   className?: string;
   size?: "default" | "sm";
   clearable?: boolean;
+  clearLabel?: string;
 };
 
 export const selectTriggerStyles =
@@ -87,6 +88,7 @@ export function Select({
   className,
   size = "default",
   clearable = false,
+  clearLabel = "清除选择",
 }: SharedProps & {
   value: string;
   onValueChange: (value: string) => void;
@@ -121,7 +123,7 @@ export function Select({
                 className={itemStyles}
                 onSelect={() => onValueChange("")}
               >
-                <span className="font-medium text-[var(--muted)]">不使用（可选）</span>
+                <span className="font-medium text-[var(--muted)]">{clearLabel}</span>
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
             </>

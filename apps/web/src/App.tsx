@@ -49,6 +49,9 @@ const StorageSettingsPage = lazy(() =>
     default: module.StorageSettingsPage,
   })),
 );
+const SkillsPage = lazy(() =>
+  import("./pages/SkillsPage").then((module) => ({ default: module.SkillsPage })),
+);
 const TasksPage = lazy(() =>
   import("./pages/TasksPage").then((module) => ({ default: module.TasksPage })),
 );
@@ -105,6 +108,7 @@ export default function App() {
             <Route path="wiki" element={<WikiPage />} />
             <Route path="wiki/graph" element={<WikiGraphPage />} />
             <Route path="tokens" element={<TokensPage />} />
+            <Route path="skills" element={<SkillsPage />} />
             <Route element={<AdminOnly />}>
               <Route path="admin/models" element={<ModelsPage />} />
               <Route path="admin/ocr" element={<OcrSettingsPage />} />

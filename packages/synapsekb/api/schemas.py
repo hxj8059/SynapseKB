@@ -576,6 +576,25 @@ class AgentRunRead(ORMModel):
     updated_at: datetime
 
 
+class AgentRunSummaryRead(ORMModel):
+    id: uuid.UUID
+    agent_id: uuid.UUID
+    status: str
+    query: str
+    error_summary: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentRunHistoryRead(BaseModel):
+    items: list[AgentRunSummaryRead]
+    total: int
+    limit: int
+    offset: int
+
+
 class WikiPageRead(ORMModel):
     id: uuid.UUID
     space_id: uuid.UUID

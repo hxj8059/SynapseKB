@@ -15,6 +15,7 @@ RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.6
 COPY pyproject.toml uv.lock README.md ./
 COPY packages ./packages
 COPY apps ./apps
+COPY skills ./skills
 COPY migrations ./migrations
 COPY alembic.ini ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev

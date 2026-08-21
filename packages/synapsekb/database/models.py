@@ -342,6 +342,15 @@ agent_users = Table(
 
 class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "agent_runs"
+    __table_args__ = (
+        Index(
+            "ix_agent_runs_user_agent_created",
+            "user_id",
+            "agent_id",
+            "created_at",
+            "id",
+        ),
+    )
 
     agent_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("agents.id", ondelete="RESTRICT"), index=True

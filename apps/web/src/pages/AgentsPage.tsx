@@ -1,5 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Bot, Plus, Send, Square } from "lucide-react";
+import {
+  BookOpen,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  Plus,
+  Send,
+  Square,
+} from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
@@ -14,11 +23,14 @@ import { api } from "../lib/api";
 import type {
   Agent,
   AgentRun,
+  AgentRunHistory,
   KnowledgeBase,
   ProviderModel,
   User,
 } from "../lib/types";
 import { useAuthStore } from "../stores/auth";
+
+const HISTORY_PAGE_SIZE = 12;
 
 export function AgentsPage() {
   const user = useAuthStore((state) => state.user);
@@ -26,6 +38,7 @@ export function AgentsPage() {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [question, setQuestion] = useState("");
   const [runId, setRunId] = useState<string | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editingRuntime, setEditingRuntime] = useState(false);
   const [runtime, setRuntime] = useState({
@@ -73,6 +86,25 @@ export function AgentsPage() {
         ? false
         : 1200,
   });
+  const historyOffset = (historyPage - 1) * HISTORY_PAGE_SIZE;
+  const {
+    data: history,
+    error: historyError,
+    isLoading: historyLoading,
+  } = useQuery({
+    queryKey: ["agent-runs", selectedAgentId, historyPage],
+    queryFn: () =>
+      api<AgentRunHistory>(
+        `/agents/${selectedAgentId}/runs?limit=${HISTORY_PAGE_SIZE}&offset=${historyOffset}`,
+      ),
+    enabled: Boolean(selectedAgentId),
+    refetchInterval: (query) =>
+      query.state.data?.items.some((item) =>
+        ["queued", "running"].includes(item.status),
+      )
+        ? 2000
+        : false,
+  });
   useEffect(() => {
     if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
   }, [agents, selectedAgentId]);
@@ -86,6 +118,15 @@ export function AgentsPage() {
       timeout_seconds: selectedAgent.timeout_seconds,
     });
   }, [selectedAgent]);
+  useEffect(() => {
+    if (
+      run &&
+      selectedAgentId === run.agent_id &&
+      ["completed", "cancelled", "failed"].includes(run.status)
+    ) {
+      client.invalidateQueries({ queryKey: ["agent-runs", selectedAgentId] });
+    }
+  }, [client, run?.agent_id, run?.id, run?.status, selectedAgentId]);
 
   const start = useMutation({
     mutationFn: () =>
@@ -96,6 +137,8 @@ export function AgentsPage() {
     onSuccess: (created) => {
       setRunId(created.id);
       setQuestion("");
+      setHistoryPage(1);
+      client.invalidateQueries({ queryKey: ["agent-runs", selectedAgentId] });
     },
   });
   const cancel = useMutation({
@@ -139,6 +182,11 @@ export function AgentsPage() {
     event.preventDefault();
     start.mutate();
   }
+
+  const historyTotalPages = Math.max(
+    1,
+    Math.ceil((history?.total ?? 0) / HISTORY_PAGE_SIZE),
+  );
 
   return (
     <>
@@ -280,33 +328,123 @@ export function AgentsPage() {
           {create.error && <p className="mt-3 text-sm text-red-500">{create.error.message}</p>}
         </Card>
       )}
-      <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
-        <Card className="h-fit p-3">
-          {agents.length === 0 ? (
-            <p className="p-5 text-sm text-[var(--muted)]">暂无可用 Agent</p>
-          ) : (
-            agents.map((agent) => (
-              <button
-                key={agent.id}
-                type="button"
-                className={`w-full rounded-xl p-3 text-left ${
-                  selectedAgentId === agent.id
-                    ? "bg-violet-500/10"
-                    : "hover:bg-[var(--surface-hover)]"
-                }`}
-                onClick={() => setSelectedAgentId(agent.id)}
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <Bot size={16} className="text-violet-500" />
-                  {agent.name}
-                </div>
-                <p className="mt-1 line-clamp-2 text-xs text-[var(--muted)]">
-                  {agent.description}
+      <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
+        <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
+          <Card className="p-3">
+            {agents.length === 0 ? (
+              <p className="p-5 text-sm text-[var(--muted)]">暂无可用 Agent</p>
+            ) : (
+              agents.map((agent) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  className={`w-full rounded-xl p-3 text-left ${
+                    selectedAgentId === agent.id
+                      ? "bg-violet-500/10"
+                      : "hover:bg-[var(--surface-hover)]"
+                  }`}
+                  onClick={() => {
+                    if (selectedAgentId !== agent.id) {
+                      setSelectedAgentId(agent.id);
+                      setRunId(null);
+                      setHistoryPage(1);
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <Bot size={16} className="text-violet-500" />
+                    {agent.name}
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs text-[var(--muted)]">
+                    {agent.description}
+                  </p>
+                </button>
+              ))
+            )}
+          </Card>
+          <Card className="overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <History size={15} className="text-violet-500" />
+                <h2 className="text-sm font-semibold">运行历史</h2>
+              </div>
+              <span className="text-xs text-[var(--muted)]">
+                {history?.total ?? 0} 条
+              </span>
+            </div>
+            <div className="max-h-[28rem] overflow-y-auto p-2">
+              {historyLoading ? (
+                <p className="px-3 py-6 text-center text-xs text-[var(--muted)]">
+                  正在加载历史…
                 </p>
-              </button>
-            ))
-          )}
-        </Card>
+              ) : historyError ? (
+                <p className="px-3 py-6 text-center text-xs text-red-500">
+                  {historyError.message}
+                </p>
+              ) : history?.items.length ? (
+                history.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={`打开历史：${item.query}`}
+                    className={`mb-1 w-full rounded-xl px-3 py-2.5 text-left transition ${
+                      runId === item.id
+                        ? "bg-violet-500/10 ring-1 ring-violet-500/15"
+                        : "hover:bg-[var(--surface-hover)]"
+                    }`}
+                    onClick={() => setRunId(item.id)}
+                  >
+                    <p className="line-clamp-2 text-sm leading-5">{item.query}</p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <StatusPill status={item.status} />
+                      <time className="text-[11px] text-[var(--muted)]">
+                        {new Date(item.created_at).toLocaleString("zh-CN", {
+                          month: "numeric",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </time>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="px-3 py-6 text-center text-xs text-[var(--muted)]">
+                  这个 Agent 还没有运行记录
+                </p>
+              )}
+            </div>
+            {history && history.total > HISTORY_PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-[var(--border)] px-3 py-2">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="上一页历史"
+                  disabled={historyPage <= 1}
+                  onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}
+                >
+                  <ChevronLeft size={15} />
+                </Button>
+                <span className="text-xs text-[var(--muted)]">
+                  {historyPage} / {historyTotalPages}
+                </span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="下一页历史"
+                  disabled={historyPage >= historyTotalPages}
+                  onClick={() =>
+                    setHistoryPage((page) => Math.min(historyTotalPages, page + 1))
+                  }
+                >
+                  <ChevronRight size={15} />
+                </Button>
+              </div>
+            )}
+          </Card>
+        </aside>
         <section>
           {user?.role === "admin" && selectedAgent && (
             <Card className="mb-4 p-4">
@@ -357,18 +495,27 @@ export function AgentsPage() {
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between">
-                  <StatusPill status={run.status} />
-                  {["queued", "running"].includes(run.status) && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => cancel.mutate()}
-                    >
-                      <Square size={14} />
-                      取消
-                    </Button>
-                  )}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-[var(--muted)]">分析问题</p>
+                    <h2 className="mt-1 text-base font-semibold leading-6">{run.query}</h2>
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      {new Date(run.created_at).toLocaleString("zh-CN")}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusPill status={run.status} />
+                    {["queued", "running"].includes(run.status) && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => cancel.mutate()}
+                      >
+                        <Square size={14} />
+                        取消
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {run.resolved_time_summary && (
                   <div className="mt-5 rounded-xl bg-cyan-500/10 p-3 text-xs leading-6 text-cyan-700 dark:text-cyan-300">

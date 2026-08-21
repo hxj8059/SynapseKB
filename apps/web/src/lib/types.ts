@@ -261,6 +261,26 @@ export type AgentRun = {
   updated_at: string;
 };
 
+export type AgentRunSummary = Pick<
+  AgentRun,
+  | "id"
+  | "agent_id"
+  | "status"
+  | "query"
+  | "error_summary"
+  | "started_at"
+  | "finished_at"
+  | "created_at"
+  | "updated_at"
+>;
+
+export type AgentRunHistory = {
+  items: AgentRunSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type WikiPageSummary = {
   id: string;
   space_id: string;

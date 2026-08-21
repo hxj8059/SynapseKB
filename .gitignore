@@ -20,3 +20,5 @@ output/
 tmp/
 .DS_Store
 *.log
+
+/promo-video

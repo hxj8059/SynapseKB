@@ -37,4 +37,34 @@ describe("AppShell navigation", () => {
       expect(link).toHaveAttribute("aria-current", "page");
     }
   });
+
+  it("places Skill installation after the token entry in the account panel", () => {
+    useAuthStore.setState({
+      accessToken: "test-token",
+      ready: true,
+      user: {
+        id: "user-1",
+        email: "admin@example.test",
+        display_name: "Admin",
+        role: "admin",
+        is_active: true,
+        timezone: "Asia/Shanghai",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<div>Home</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const tokenButton = screen.getByRole("button", { name: "MCP Token" });
+    const skillButton = screen.getByRole("button", { name: "Skill 安装" });
+    expect(tokenButton.closest("a")?.nextElementSibling).toBe(skillButton.closest("a"));
+  });
 });

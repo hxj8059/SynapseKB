@@ -12,6 +12,7 @@ from synapsekb.api.routes import (
     rag,
     search,
     settings,
+    skills,
     tokens,
     users,
     wiki,
@@ -26,6 +27,7 @@ router.include_router(models.router, prefix="/models", tags=["模型"])
 router.include_router(settings.router, prefix="/settings", tags=["系统设置"])
 router.include_router(operations.router, prefix="/operations", tags=["运维"])
 router.include_router(tokens.router, prefix="/tokens", tags=["MCP Token"])
+router.include_router(skills.router, prefix="/skills", tags=["Skill"])
 router.include_router(documents.router, prefix="/documents", tags=["文档"])
 router.include_router(search.router, prefix="/search", tags=["检索"])
 router.include_router(rag.router, prefix="/rag", tags=["问答"])

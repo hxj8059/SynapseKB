@@ -8,6 +8,7 @@ import {
   LogOut,
   Moon,
   Network,
+  PackageOpen,
   Search,
   ScanText,
   Cloud,
@@ -100,6 +101,13 @@ export function AppShell() {
             <KeyRound className="h-4 w-4" />
             访问令牌
           </NavLink>
+          <NavLink
+            to="/skills"
+            className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--muted)]"
+          >
+            <PackageOpen className="h-4 w-4" />
+            Skill 安装
+          </NavLink>
         </nav>
       </header>
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-[var(--border)] bg-[var(--sidebar)] px-4 py-5 lg:block">
@@ -141,6 +149,11 @@ export function AppShell() {
             <NavLink to="/tokens">
               <Button aria-label="MCP Token" variant="ghost" size="icon">
                 <KeyRound size={17} />
+              </Button>
+            </NavLink>
+            <NavLink to="/skills">
+              <Button aria-label="Skill 安装" variant="ghost" size="icon">
+                <PackageOpen size={17} />
               </Button>
             </NavLink>
             <Button aria-label="退出登录" variant="ghost" size="icon" onClick={logout}>
