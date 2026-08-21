@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/web/public/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="apps/web/public/logo-light.svg">
-    <img alt="SynapseKB" src="apps/web/public/logo-light.svg" width="320">
-  </picture>
+  <img alt="SynapseKB — Private knowledge. Verifiable answers." src="docs/assets/social-card.png" width="100%">
 </p>
 
 <h1 align="center">SynapseKB</h1>
