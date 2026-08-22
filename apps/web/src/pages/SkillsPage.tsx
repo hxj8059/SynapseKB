@@ -16,6 +16,7 @@ import { PageHeader } from "../components/PageHeader";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { download } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 
 const skills = [
   {
@@ -41,12 +42,16 @@ const skills = [
 ] as const;
 
 function CodeBlock({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
   async function copy() {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    try {
+      await copyText(value);
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 1600);
+    } catch {
+      setCopyStatus("error");
+    }
   }
 
   return (
@@ -58,8 +63,8 @@ function CodeBlock({ value, label }: { value: string; label: string }) {
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-zinc-300 transition hover:bg-white/8 hover:text-white"
           onClick={copy}
         >
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-          {copied ? "已复制" : "复制"}
+          {copyStatus === "copied" ? <Check size={13} /> : <Copy size={13} />}
+          {copyStatus === "copied" ? "已复制" : copyStatus === "error" ? "复制失败" : "复制"}
         </button>
       </div>
       <pre className="overflow-x-auto p-4 text-xs leading-6 text-cyan-100">
@@ -87,7 +92,11 @@ export function SkillsPage() {
   const [platform, setPlatform] = useState<"codex" | "workbuddy">("codex");
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const mcpUrl = useMemo(() => `${window.location.origin}/mcp`, []);
+  const insecureHttp = window.location.protocol === "http:";
   const codexConfig = `[mcp_servers.synapsekb]\nurl = "${mcpUrl}"\nbearer_token_env_var = "SYNAPSEKB_TOKEN"\ntool_timeout_sec = 120`;
+  const codexCli = `export SYNAPSEKB_TOKEN='skbp_粘贴刚创建的令牌'\ncodex mcp add synapsekb --url "${mcpUrl}" --bearer-token-env-var SYNAPSEKB_TOKEN\ncodex mcp list`;
+  const httpDeploymentConfig = `ENVIRONMENT=development\n# production 模式需额外设置：ALLOW_INSECURE_HTTP=true\nPUBLIC_BASE_URL=${window.location.origin}\nCORS_ORIGINS=["${window.location.origin}"]\nTRUSTED_HOSTS=["${window.location.hostname}","api","mcp-server"]\nMCP_ALLOWED_ORIGINS=["${window.location.origin}"]\nMCP_ALLOW_NULL_ORIGIN=${platform === "workbuddy" ? "true" : "false"}\nTRUST_PROXY_HEADERS=true`;
+  const stdioHttpConfig = `export SYNAPSEKB_URL="${window.location.origin}"\nexport SYNAPSEKB_TOKEN='skbp_粘贴刚创建的令牌'\nexport SYNAPSEKB_ALLOW_INSECURE_HTTP=true\nsynapsekb-mcp`;
 
   async function downloadPackage(path: string, filename: string) {
     setDownloadError(null);
@@ -114,8 +123,8 @@ export function SkillsPage() {
               SynapseKB Skills
             </div>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-              Skill 只提供工作流规则，不保存 Token，也不能替代 MCP。请同时配置下方的
-              Streamable HTTP MCP 连接。
+              Skill 只提供工作流规则，不会自行建立网络连接，也不保存 Token。外部工具必须
+              同时配置下方的 Streamable HTTP MCP，才能实际访问知识库。
             </p>
           </div>
           <Button onClick={() => downloadPackage("/skills/bundle", "synapsekb-skills.zip")}>
@@ -219,6 +228,11 @@ export function SkillsPage() {
                     <code className="mx-1 rounded bg-[var(--surface-hover)] px-1.5 py-0.5 text-xs">SYNAPSEKB_TOKEN</code>。
                   </p>
                   <CodeBlock label="Codex config.toml" value={codexConfig} />
+                  <p>
+                    也可以直接执行下面的 Codex CLI 命令。环境变量必须设置在启动 Codex 的
+                    同一个终端或进程环境中；仅写入另一个 Shell 配置但未重启 Codex，不会生效。
+                  </p>
+                  <CodeBlock label="Codex CLI" value={codexCli} />
                 </>
               ) : (
                 <p>
@@ -243,9 +257,33 @@ export function SkillsPage() {
         <KeyRound className="mt-0.5 shrink-0 text-cyan-500" size={18} />
         <p>
           当前地址为 <span className="font-mono text-xs text-[var(--text)]">{mcpUrl}</span>。
-          公网部署应使用 HTTPS；普通 HTTP 会明文传输 Bearer Token，不适合作为正式生产连接。
+          {insecureHttp
+            ? " 当前是 HTTP 兼容模式：可以连接，但 Bearer Token、查询和返回内容会以明文经过网络。"
+            : " 当前通过 HTTPS 连接。"}
         </p>
       </div>
+      {insecureHttp && (
+        <Card className="mt-4 border-amber-500/25 bg-amber-500/5 p-5">
+          <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+            HTTP + IP 服务器需要显式启用兼容模式
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+            将以下配置写入服务器 `.env` 后重建 API、MCP Server 和 Web。development 可以直接
+            使用；production 还需设置 `ALLOW_INSECURE_HTTP=true`。`MCP_ALLOW_NULL_ORIGIN`
+            用于兼容会发送 `Origin: null` 的桌面 WebView 客户端。
+          </p>
+          <div className="mt-4">
+            <CodeBlock label="服务器 .env（HTTP 兼容模式）" value={httpDeploymentConfig} />
+          </div>
+          <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+            如果客户端通过本地 <code>synapsekb-mcp</code> stdio 代理连接，还需在代理进程中
+            单独确认明文传输风险：
+          </p>
+          <div className="mt-3">
+            <CodeBlock label="本地 stdio 代理（HTTP 显式授权）" value={stdioHttpConfig} />
+          </div>
+        </Card>
+      )}
     </>
   );
 }

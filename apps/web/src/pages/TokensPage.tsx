@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Trash2 } from "lucide-react";
+import { Ban, Check, Copy, KeyRound, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
@@ -8,6 +8,7 @@ import { Card } from "../components/ui/card";
 import { DateTimePicker } from "../components/ui/date-time-picker";
 import { Input } from "../components/ui/input";
 import { api } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 import { useAuthStore } from "../stores/auth";
 
 const defaultScopes = [
@@ -44,6 +45,7 @@ export function TokensPage() {
   const [name, setName] = useState("我的只读工具");
   const [expiresAt, setExpiresAt] = useState("");
   const [scopes, setScopes] = useState(defaultScopes);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
   const { data: tokens = [] } = useQuery({
     queryKey: ["tokens"],
     queryFn: () => api<StoredToken[]>("/tokens"),
@@ -64,6 +66,22 @@ export function TokensPage() {
     mutationFn: (id: string) => api<void>(`/tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["tokens"] }),
   });
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/tokens/${id}/record`, { method: "DELETE" }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["tokens"] }),
+  });
+
+  async function copyCreatedToken() {
+    if (!create.data) return;
+    try {
+      await copyText(create.data.token);
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 1800);
+    } catch {
+      setCopyStatus("error");
+    }
+  }
 
   return (
     <>
@@ -123,12 +141,20 @@ export function TokensPage() {
               </code>
               <Button
                 variant="ghost"
-                size="icon"
-                onClick={() => navigator.clipboard.writeText(create.data.token)}
+                size="sm"
+                className="text-zinc-200 hover:bg-white/10 hover:text-white"
+                aria-label="复制访问令牌"
+                onClick={copyCreatedToken}
               >
-                <Copy size={16} />
+                {copyStatus === "copied" ? <Check size={16} /> : <Copy size={16} />}
+                {copyStatus === "copied" ? "已复制" : "复制"}
               </Button>
             </div>
+            {copyStatus === "error" && (
+              <p className="mt-3 text-xs text-red-300">
+                自动复制失败，请手动选择上方令牌并复制。生产环境建议使用 HTTPS。
+              </p>
+            )}
           </div>
         )}
       </Card>
@@ -137,39 +163,83 @@ export function TokensPage() {
           已创建令牌
         </div>
         <div className="divide-y divide-[var(--border)]">
-          {tokens.map((token) => (
-            <div
-              key={token.id}
-              className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_1fr_auto] md:items-center"
-            >
-              <div>
-                <div className="text-sm font-semibold">{token.name}</div>
-                <div className="mt-1 font-mono text-xs text-[var(--muted)]">
-                  {token.token_prefix}…
+          {tokens.map((token) => {
+            const expired = Boolean(
+              token.expires_at && new Date(token.expires_at).getTime() <= Date.now(),
+            );
+            const inactive = Boolean(token.revoked_at) || expired;
+            return (
+              <div
+                key={token.id}
+                className="grid gap-3 px-5 py-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center"
+              >
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">{token.name}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        token.revoked_at
+                          ? "bg-zinc-500/10 text-zinc-500"
+                          : expired
+                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-300"
+                            : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                      }`}
+                    >
+                      {token.revoked_at ? "已撤销" : expired ? "已过期" : "有效"}
+                    </span>
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-[var(--muted)]">
+                    {token.token_prefix}…
+                  </div>
                 </div>
+                <div className="text-xs leading-5 text-[var(--muted)]">
+                  {token.scopes.join(" · ")}
+                  <br />
+                  最近使用：{token.last_used_at || "从未"}
+                </div>
+                {!inactive ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={revoke.isPending}
+                    onClick={() => {
+                      if (window.confirm(`确认撤销令牌“${token.name}”？撤销后立即失效。`)) {
+                        revoke.mutate(token.id);
+                      }
+                    }}
+                  >
+                    <Ban size={15} />
+                    撤销
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 hover:text-red-600"
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `确认删除令牌“${token.name}”的记录？审计日志仍会保留。`,
+                        )
+                      ) {
+                        remove.mutate(token.id);
+                      }
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    删除记录
+                  </Button>
+                )}
               </div>
-              <div className="text-xs leading-5 text-[var(--muted)]">
-                {token.scopes.join(" · ")}
-                <br />
-                最近使用：{token.last_used_at || "从未"}
-              </div>
-              {!token.revoked_at && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="撤销令牌"
-                  onClick={() => {
-                    if (window.confirm(`确认撤销令牌“${token.name}”？`)) {
-                      revoke.mutate(token.id);
-                    }
-                  }}
-                >
-                  <Trash2 size={16} />
-                </Button>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
+        {(revoke.error || remove.error) && (
+          <p className="border-t border-[var(--border)] px-5 py-3 text-sm text-red-500">
+            {(revoke.error || remove.error)?.message}
+          </p>
+        )}
       </Card>
     </>
   );

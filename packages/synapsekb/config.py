@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     app_name: str = "SynapseKB"
     api_prefix: str = "/api/v1"
     public_base_url: str = "http://localhost"
+    allow_insecure_http: bool = False
     default_timezone: str = "Asia/Shanghai"
 
     database_url: str = "postgresql+asyncpg://synapsekb:synapsekb@postgres:5432/synapsekb"
@@ -34,6 +36,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     trusted_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
     mcp_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost"])
+    mcp_allow_null_origin: bool = False
     mcp_rate_limit_per_minute: int = 60
     api_rate_limit_per_minute: int = 300
     auth_rate_limit_per_minute: int = 20
@@ -73,6 +76,67 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET must contain at least 32 characters")
         return value
 
+    @field_validator("public_base_url")
+    @classmethod
+    def validate_public_base_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("PUBLIC_BASE_URL must be an absolute HTTP(S) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("PUBLIC_BASE_URL cannot contain credentials, query, or fragment")
+        if parsed.path not in {"", "/"}:
+            raise ValueError("PUBLIC_BASE_URL cannot contain a path")
+        return normalized
+
+    @property
+    def public_origin(self) -> str:
+        parsed = urlsplit(self.public_base_url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    @property
+    def public_host(self) -> str:
+        return urlsplit(self.public_base_url).hostname or "localhost"
+
+    @property
+    def secure_cookies(self) -> bool:
+        return urlsplit(self.public_base_url).scheme == "https"
+
+    @property
+    def effective_cors_origins(self) -> list[str]:
+        return _unique_origins([*self.cors_origins, self.public_origin])
+
+    @property
+    def effective_trusted_hosts(self) -> list[str]:
+        return list(dict.fromkeys([*self.trusted_hosts, self.public_host]))
+
+    @property
+    def effective_mcp_allowed_origins(self) -> list[str]:
+        origins = _unique_origins([*self.mcp_allowed_origins, self.public_origin])
+        if self.mcp_allow_null_origin:
+            origins.append("null")
+        return origins
+
+    @property
+    def mcp_transport_allowed_hosts(self) -> list[str]:
+        allowed: list[str] = []
+        for host in self.effective_trusted_hosts:
+            if host == "*":
+                continue
+            allowed.append(host)
+            if ":" not in host and not host.startswith("["):
+                allowed.append(f"{host}:*")
+        return list(dict.fromkeys(allowed))
+
+    @property
+    def mcp_transport_allowed_origins(self) -> list[str]:
+        allowed: list[str] = []
+        for origin in self.effective_mcp_allowed_origins:
+            allowed.append(origin)
+            if origin != "null" and urlsplit(origin).port is None:
+                allowed.append(f"{origin}:*")
+        return list(dict.fromkeys(allowed))
+
     def assert_production_safe(self) -> None:
         if self.environment != "production":
             return
@@ -80,8 +144,10 @@ class Settings(BaseSettings):
             raise RuntimeError("Production JWT_SECRET is not configured")
         if not self.credential_master_key.get_secret_value():
             raise RuntimeError("Production CREDENTIAL_MASTER_KEY is not configured")
-        if not self.public_base_url.startswith("https://"):
-            raise RuntimeError("Production PUBLIC_BASE_URL must use HTTPS")
+        if not self.secure_cookies and not self.allow_insecure_http:
+            raise RuntimeError(
+                "Production PUBLIC_BASE_URL must use HTTPS unless ALLOW_INSECURE_HTTP=true"
+            )
 
 
 @lru_cache(maxsize=1)
@@ -89,3 +155,12 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.assert_production_safe()
     return settings
+
+
+def _unique_origins(values: list[str]) -> list[str]:
+    origins: list[str] = []
+    for value in values:
+        normalized = value.strip().rstrip("/")
+        if normalized and normalized not in origins:
+            origins.append(normalized)
+    return origins

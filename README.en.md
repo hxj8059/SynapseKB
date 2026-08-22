@@ -171,8 +171,10 @@ After signing in:
 > [!WARNING]
 > The default `.env.example` uses `development`, HTTP, and local storage. It is for local evaluation
 > only. Exposing the default Compose stack to the internet is not a production deployment. Production
-> requires HTTPS, strong secrets, exact host/origin allowlists, cloud object storage, database backups,
-> and least-privilege network rules. See [Deployment and upgrades](docs/deployment.md).
+> should use HTTPS. If only a public IP is currently available, explicitly enable the restricted HTTP
+> compatibility mode and still configure strong secrets, exact host/origin allowlists, cloud object
+> storage, database backups, and least-privilege network rules. See
+> [Deployment and upgrades](docs/deployment.md).
 
 ## Model and storage configuration
 
@@ -319,7 +321,8 @@ architecture, and operating model.
 ## Security
 
 - Never commit `.env`, database dumps, real documents, access tokens, or cloud/API credentials.
-- Public deployments must use HTTPS. HTTP model gateways are acceptable only inside a trusted VPC.
+- Public deployments should use HTTPS. Public-IP HTTP is an explicit compatibility mode only; HTTP
+  model gateways are acceptable only inside a trusted VPC.
 - PATs are displayed once; API keys are encrypted; normal logs exclude full documents, prompts, and
   secrets.
 - Do not include exploit details, real data, or credentials in public issues. Prefer a private GitHub

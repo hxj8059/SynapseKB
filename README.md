@@ -162,8 +162,9 @@ docker compose exec api synapsekb-admin \
 
 > [!WARNING]
 > 默认 `.env.example` 使用 `development`、HTTP 和本地对象存储，仅适合本机体验。把 Compose
-> 直接暴露到公网不等于生产部署。生产必须设置 HTTPS、强随机密钥、真实域名白名单、云对象
-> 存储、数据库备份和最小权限安全组，详见[部署与升级](docs/deployment.md)。
+> 直接暴露到公网不等于生产部署。生产推荐使用 HTTPS；暂时只有公网 IP 时，必须显式启用
+> 受限的 HTTP 兼容模式，并同时设置强随机密钥、精确 Host/Origin 白名单、云对象存储、数据库
+> 备份和最小权限安全组，详见[部署与升级](docs/deployment.md)。
 
 ## 模型与存储配置
 
@@ -303,7 +304,8 @@ curl -f http://127.0.0.1:8088/api/v1/health
 ## 安全
 
 - 不要提交 `.env`、数据库备份、真实文档、访问令牌或任何云厂商/API 密钥。
-- 公开部署必须使用 HTTPS；HTTP 模型网关只能位于受信 VPC/内网。
+- 公开部署应使用 HTTPS；公网 IP + HTTP 仅作为显式兼容模式，HTTP 模型网关只能位于受信
+  VPC/内网。
 - PAT 只展示一次；API Key 加密存储；普通日志不记录完整文档、Prompt 或密钥。
 - 发现安全问题时，请不要在公开 Issue 中附带利用细节、真实数据或密钥；优先使用 GitHub
   Security Advisory 私下报告。

@@ -35,6 +35,7 @@ from synapsekb.storage.config import (
     STORAGE_SETTING_KEY,
     load_storage_config,
 )
+from synapsekb.storage.errors import describe_storage_error
 from synapsekb.storage.factory import create_storage
 
 router = APIRouter()
@@ -219,6 +220,19 @@ async def update_storage_settings(
     require_admin(user)
     if payload.backend != "local" and (payload.endpoint is None or not payload.bucket):
         raise HTTPException(status_code=422, detail="对象存储需要 Endpoint 和 Bucket")
+    if (
+        payload.backend == "cos"
+        and payload.endpoint is not None
+        and payload.endpoint.host
+        and payload.endpoint.host.startswith(f"{payload.bucket}.")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "腾讯云 COS Endpoint 应填写不含 Bucket 名称的服务地址，"
+                "例如 https://cos.ap-shanghai.myqcloud.com"
+            ),
+        )
     from synapsekb.config import get_settings
 
     if get_settings().environment == "production":
@@ -302,24 +316,56 @@ async def test_storage_settings(
     storage = create_storage(config=config)
     key = f"_connection-tests/{uuid.uuid4()}.txt"
     started = time.perf_counter()
+    stage = "准备连接测试"
+    uploaded = False
+    operation_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    presigned: str | None = None
     with tempfile.TemporaryDirectory(prefix="synapsekb-storage-test-") as temp_dir:
         path = Path(temp_dir) / "probe.txt"
         async with aiofiles.open(path, "wb") as handle:
             await handle.write(b"SynapseKB object storage connection test")
         try:
+            stage = "写入测试对象"
             await storage.put_file(key, path, "text/plain")
+            uploaded = True
+            stage = "检查测试对象"
             if not await storage.exists(key):
                 raise HTTPException(status_code=502, detail="写入后无法读取测试对象")
+            stage = "读取测试对象"
             content = await storage.read(key)
             if content != b"SynapseKB object storage connection test":
                 raise HTTPException(status_code=502, detail="对象存储测试内容不一致")
+            stage = "生成浏览器预签名地址"
             presigned = await storage.presign_upload(
                 f"_connection-tests/{uuid.uuid4()}.txt",
                 "text/plain",
                 60,
             )
+        except Exception as exc:  # converted below after cleanup
+            operation_error = exc
         finally:
-            await storage.delete(key)
+            if uploaded:
+                try:
+                    await storage.delete(key)
+                except Exception as exc:  # report cleanup without hiding the primary failure
+                    cleanup_error = exc
+    if operation_error is not None:
+        if isinstance(operation_error, HTTPException):
+            raise operation_error
+        error_detail = describe_storage_error(operation_error, backend=config.backend)
+        raise HTTPException(
+            status_code=502,
+            detail=f"对象存储{stage}失败：{error_detail}",
+        ) from operation_error
+    if cleanup_error is not None:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "对象存储读写成功，但清理测试对象失败："
+                f"{describe_storage_error(cleanup_error, backend=config.backend)}"
+            ),
+        ) from cleanup_error
     session.add(
         AuditLog(
             actor_user_id=user.id,
@@ -335,5 +381,5 @@ async def test_storage_settings(
         backend=config.backend,
         bucket=config.bucket,
         latency_ms=int((time.perf_counter() - started) * 1000),
-        presigned_upload_supported=presigned is not None,
+        presigned_upload_supported=bool(presigned),
     )

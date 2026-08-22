@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import ColumnElement, and_, exists, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from synapsekb.auth.policy import (
     knowledge_base_access_clause,
     require_knowledge_base_access,
 )
+from synapsekb.config import get_settings
 from synapsekb.database.models import (
     Agent,
     AgentRun,
@@ -46,6 +48,8 @@ from synapsekb.models.provider import DeterministicMockProvider, create_provider
 from synapsekb.retrieval.context import build_citation_context
 from synapsekb.storage.factory import create_runtime_storage
 
+settings = get_settings()
+
 mcp = FastMCP(
     "SynapseKB",
     instructions=(
@@ -55,6 +59,12 @@ mcp = FastMCP(
     streamable_http_path="/mcp",
     stateless_http=True,
     json_response=True,
+    host="0.0.0.0",  # noqa: S104 - exposed only through the Nginx service network
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=settings.mcp_transport_allowed_hosts,
+        allowed_origins=settings.mcp_transport_allowed_origins,
+    ),
 )
 
 

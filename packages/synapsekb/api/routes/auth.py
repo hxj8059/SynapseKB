@@ -28,7 +28,7 @@ def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) ->
         token,
         expires=expires_at,
         httponly=True,
-        secure=settings.environment == "production",
+        secure=settings.secure_cookies,
         samesite="lax",
         path=f"{settings.api_prefix}/auth",
     )

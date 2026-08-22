@@ -14,7 +14,13 @@ Use these rules for every SynapseKB MCP workflow.
 3. Never place the token in prompts, logs, source files, shell history, or generated reports.
 4. If authentication fails, ask the user to create or replace a token in SynapseKB. Do not request their password.
 
-The normal remote endpoint is `https://<synapsekb-host>/mcp`. A local `synapsekb-mcp` stdio proxy may be used when the host cannot connect to Streamable HTTP directly.
+The remote endpoint is `https://<synapsekb-host>/mcp`, or
+`http://<server-ip>[:port]/mcp` only when that SynapseKB deployment explicitly enables its insecure
+HTTP compatibility mode. A local `synapsekb-mcp` stdio proxy may be used when the host cannot connect
+to Streamable HTTP directly. The proxy rejects remote plaintext HTTP by default; when the deployment
+explicitly uses HTTP and the user has accepted the transport risk, its process must also set
+`SYNAPSEKB_ALLOW_INSECURE_HTTP=true`. A Skill does not establish this connection by itself: verify that
+the MCP server named `synapsekb` is configured and available before calling tools.
 
 ## Select the knowledge scope
 

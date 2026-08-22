@@ -12,6 +12,9 @@ kb:read document:read search:read agent:run wiki:read
 同一个含 `document:write` 的 PAT 也可以用于 REST 文档上传接口，适合批量上传和 OSS
 预签名直传；MCP `document_upload` 仍保留 10MB 限制。
 
+不再使用的有效令牌应先撤销，使其立即失效。已撤销或已过期的令牌可以从列表删除；删除
+只清理令牌记录，创建、使用、撤销和删除事件仍保留在审计日志中。
+
 ## Remote Streamable HTTP
 
 ```json
@@ -27,7 +30,23 @@ kb:read document:read search:read agent:run wiki:read
 }
 ```
 
-生产必须使用 HTTPS。服务端验证 Bearer Token、Origin、用户状态、Scope、知识库权限和速率，并为每次工具调用写审计日志。
+推荐使用 HTTPS。显式启用 `ALLOW_INSECURE_HTTP=true` 后也可连接
+`http://<server-ip>[:port]/mcp`，但 Bearer Token、查询和返回内容不会被传输加密。服务端仍
+验证 Bearer Token、Host、Origin、用户状态、Scope、知识库权限和速率，并为每次工具调用写
+审计日志。
+
+Codex 可以直接配置 Streamable HTTP：
+
+```bash
+export SYNAPSEKB_TOKEN='skbp_...'
+codex mcp add synapsekb \
+  --url 'http://203.0.113.10:8088/mcp' \
+  --bearer-token-env-var SYNAPSEKB_TOKEN
+codex mcp list
+```
+
+Skill 只描述工具选择、时间过滤与引用规则，不会自行建立连接。安装 Skill 后仍必须配置 MCP；
+设置 `SYNAPSEKB_TOKEN` 的进程环境必须与启动 Codex 的环境一致。
 
 ## 本地 stdio 代理
 
@@ -38,6 +57,19 @@ export SYNAPSEKB_URL=https://synapsekb.example.com
 export SYNAPSEKB_TOKEN=skbp_...
 synapsekb-mcp
 ```
+
+当服务器只有公网 IP + HTTP，并且你已经明确接受 Bearer Token 明文传输风险时，必须额外进行
+一次显式授权；默认仍拒绝向远程 HTTP 地址发送令牌：
+
+```bash
+export SYNAPSEKB_URL=http://203.0.113.10:8088
+export SYNAPSEKB_TOKEN=skbp_...
+export SYNAPSEKB_ALLOW_INSECURE_HTTP=true
+synapsekb-mcp
+```
+
+`SYNAPSEKB_URL` 可以填写服务根地址或完整 `/mcp` 地址，代理会统一规范化为一个 `/mcp`，不会
+重复拼接。切换回 HTTPS 后应删除 `SYNAPSEKB_ALLOW_INSECURE_HTTP`。
 
 客户端配置：
 

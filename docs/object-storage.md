@@ -54,12 +54,18 @@ STORAGE_SECRET_KEY=...
 ```
 
 COS Bucket 名需要包含 APPID。建议使用子账号密钥、最小权限策略和服务端加密。
+`STORAGE_ENDPOINT` 必须填写地域级服务地址，不要填写形如
+`https://<bucket>.cos.<region>.myqcloud.com` 的 Bucket 访问 URL；虚拟主机寻址会自动拼接
+Bucket 名称。
 
 ## 生产检查
 
-- 对象存储 endpoint 和 `PUBLIC_BASE_URL` 必须为 HTTPS。
+- 对象存储 endpoint 必须为 HTTPS；`PUBLIC_BASE_URL` 默认也必须为 HTTPS，仅可按部署文档显式
+  启用公网 IP + HTTP 兼容模式。
 - 密钥只放在部署环境或密钥管理服务中，不写入仓库。
 - `CREDENTIAL_MASTER_KEY` 必须固定、安全备份；丢失后无法解密运行时凭据。
-- CORS 仅允许实际 Web 域名执行 `PUT`，不要使用通配 Origin。
+- CORS 仅允许实际 Web Origin 执行 `GET`、`PUT` 和 `HEAD`，不要使用通配 Origin；IP + HTTP
+  部署必须包含完整 Origin（例如 `http://203.0.113.10:8088`），同时允许 `Content-Type` 及
+  实际使用的 `x-cos-*` / `x-oss-*` 请求头。
 - 生命周期策略应覆盖失败上传产生的孤立对象。
 - 启用版本控制或定期复制，并按恢复文档验证下载和恢复流程。

@@ -154,9 +154,20 @@ export function StorageSettingsPage() {
                     type="url"
                     value={form.endpoint}
                     onChange={(event) => setForm({ ...form, endpoint: event.target.value })}
-                    placeholder="https://oss-cn-shanghai.aliyuncs.com"
+                    placeholder={
+                      form.backend === "cos"
+                        ? "https://cos.ap-shanghai.myqcloud.com"
+                        : form.backend === "oss"
+                          ? "https://oss-cn-shanghai.aliyuncs.com"
+                          : "https://s3.example.com"
+                    }
                     required
                   />
+                  {form.backend === "cos" && (
+                    <span className="mt-1.5 block text-xs text-[var(--muted)]">
+                      请填写不含 Bucket 名称的服务地址，不要填写 Bucket 访问 URL。
+                    </span>
+                  )}
                 </label>
                 <label className="block text-sm">
                   <span className="mb-1.5 block text-[var(--muted)]">

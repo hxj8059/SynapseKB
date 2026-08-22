@@ -107,3 +107,41 @@ async def revoke_token(
         )
     )
     await session.commit()
+
+
+@router.delete("/{token_id}/record", status_code=204)
+async def delete_token_record(
+    token_id: uuid.UUID,
+    user: CurrentUser,
+    session: DatabaseSession,
+) -> None:
+    token = await session.scalar(
+        select(PersonalAccessToken).where(
+            PersonalAccessToken.id == token_id,
+            PersonalAccessToken.user_id == user.id,
+        )
+    )
+    if token is None:
+        raise HTTPException(status_code=404, detail="Token 不存在")
+    now = datetime.now(UTC)
+    if token.revoked_at is None and (token.expires_at is None or token.expires_at > now):
+        raise HTTPException(status_code=409, detail="有效令牌必须先撤销，才能删除记录")
+    session.add(
+        AuditLog(
+            actor_user_id=user.id,
+            action="personal_access_token.delete",
+            resource_type="personal_access_token",
+            resource_id=token.id,
+            metadata_json={
+                "name": token.name,
+                "token_prefix": token.token_prefix,
+                "scopes": token.scopes,
+                "expires_at": token.expires_at.isoformat() if token.expires_at else None,
+                "revoked_at": token.revoked_at.isoformat() if token.revoked_at else None,
+                "last_used_at": token.last_used_at.isoformat() if token.last_used_at else None,
+            },
+            created_at=now,
+        )
+    )
+    await session.delete(token)
+    await session.commit()

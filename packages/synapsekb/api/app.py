@@ -37,10 +37,10 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.effective_trusted_hosts)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.effective_cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],

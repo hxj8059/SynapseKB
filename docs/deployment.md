@@ -33,6 +33,49 @@
 Origin 白名单。API 容器不可另行映射公网端口。Compose 默认把 Web 映射到
 `WEB_PORT=8088`，避免占用宿主机已有的 80 端口；生产上游代理到该端口即可。
 
+### 公网 IP + HTTP 兼容模式
+
+没有域名或证书时，可以显式启用 HTTP 兼容模式。它仍使用 `production` 的密钥、对象存储、
+权限和任务安全检查，但 Refresh Cookie 不设置 `Secure`，MCP 接受配置的 HTTP Origin。
+这只解决协议兼容，不提供传输加密：登录凭证、PAT、检索问题、引用和文档内容都可能被链路
+上的第三方读取或篡改。
+
+假设访问地址是 `http://203.0.113.10:8088`：
+
+```dotenv
+ENVIRONMENT=production
+PUBLIC_BASE_URL=http://203.0.113.10:8088
+ALLOW_INSECURE_HTTP=true
+CORS_ORIGINS=["http://203.0.113.10:8088"]
+TRUSTED_HOSTS=["203.0.113.10","api","mcp-server"]
+MCP_ALLOWED_ORIGINS=["http://203.0.113.10:8088"]
+MCP_ALLOW_NULL_ORIGIN=true
+TRUST_PROXY_HEADERS=true
+```
+
+`PUBLIC_BASE_URL` 会自动补入 API 的 CORS/Trusted Host 和 MCP Origin/Host 校验，显式列表仍应
+保留，便于审计。`MCP_ALLOW_NULL_ORIGIN=true` 只用于发送 `Origin: null` 的 WorkBuddy 或
+Electron WebView；纯 Codex Streamable HTTP 客户端通常不发送 Origin。
+
+更新后必须重建所有读取后端配置的进程：
+
+```bash
+docker compose build api mcp-server agent-runner document-worker ocr-worker wiki-worker wiki-scheduler web
+docker compose up -d --remove-orphans
+```
+
+检查：
+
+```bash
+curl -i http://203.0.113.10:8088/api/v1/health
+curl -i http://203.0.113.10:8088/mcp
+```
+
+第二个请求应返回 `401 缺少 Bearer Token`，这表示 Nginx 已成功转发到 MCP；`404`、`421` 或
+连接失败表示路由、Host 白名单或安全组仍未配置正确。对象存储浏览器直传和预览还需要在
+OSS/COS Bucket CORS 中允许该 HTTP Origin、`GET`/`PUT`/`HEAD` 方法、`Content-Type` 及实际
+使用的 `x-cos-*` / `x-oss-*` 请求头。
+
 后端 Docker 构建默认从阿里云 PyPI 镜像读取锁定依赖，并限制并发下载。需要使用其他
 可信镜像时传入 `--build-arg PYPI_INDEX_URL=https://.../simple/`，同时用同一索引重新
 生成 `uv.lock`，不得关闭 TLS 或跳过哈希校验。
