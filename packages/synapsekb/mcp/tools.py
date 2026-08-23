@@ -460,7 +460,10 @@ async def rag_answer(
         knowledge_bases = list(
             (
                 await session.scalars(
-                    select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids))
+                    select(KnowledgeBase).where(
+                        KnowledgeBase.id.in_(kb_ids),
+                        KnowledgeBase.lifecycle_status == "active",
+                    )
                 )
             ).all()
         )

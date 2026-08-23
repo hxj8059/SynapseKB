@@ -68,8 +68,10 @@ services:
     command:
       - dramatiq
       - apps.document_worker.actors
+      - apps.document_worker.maintenance_actors
       - --queues
       - document
+      - maintenance
       - --processes
       - "1"
       - --threads

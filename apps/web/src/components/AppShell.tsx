@@ -12,6 +12,7 @@ import {
   Search,
   ScanText,
   Cloud,
+  Database,
   Settings2,
   Sun,
   ListChecks,
@@ -37,6 +38,7 @@ const primary = [
 ];
 
 const admin = [
+  { to: "/admin/knowledge-bases", label: "知识库管理", icon: Database },
   { to: "/admin/models", label: "模型设置", icon: Settings2 },
   { to: "/admin/ocr", label: "OCR 设置", icon: ScanText },
   { to: "/admin/storage", label: "对象存储", icon: Cloud },

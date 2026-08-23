@@ -92,7 +92,8 @@ flowchart LR
 ```
 
 The API handles short requests, authentication, and authorization. Dramatiq workers handle parsing,
-OCR, embeddings, and Wiki jobs. The Agent Runner executes LangGraph workflows. PostgreSQL stores
+OCR, embeddings, Wiki jobs, and knowledge-base cleanup. Low-frequency cleanup runs on a separate
+maintenance queue consumed by the Document Worker. The Agent Runner executes LangGraph workflows. PostgreSQL stores
 business truth and vectors; Redis provides queues, events, cancellation signals, and rate limits. See
 the [architecture document](docs/architecture.md) for the detailed decisions.
 
@@ -230,7 +231,7 @@ See [MCP and Skill integration](docs/mcp.md) and the [REST API guide](docs/api.m
 apps/
   api/                  FastAPI entry point
   agent_runner/         LangGraph Agent execution
-  document_worker/      Parsing, chunking, and embeddings
+  document_worker/      Parsing, embeddings, and low-frequency maintenance jobs
   ocr_worker/           PaddleOCR cloud polling
   wiki_worker/          Wiki generation, maintenance, and scheduling
   mcp_server/           Remote Streamable HTTP MCP

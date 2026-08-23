@@ -67,4 +67,53 @@ describe("AppShell navigation", () => {
     const skillButton = screen.getByRole("button", { name: "Skill 安装" });
     expect(tokenButton.closest("a")?.nextElementSibling).toBe(skillButton.closest("a"));
   });
+
+  it("shows knowledge-base management only to administrators", () => {
+    useAuthStore.setState({
+      accessToken: "test-token",
+      ready: true,
+      user: {
+        id: "user-1",
+        email: "admin@example.test",
+        display_name: "Admin",
+        role: "admin",
+        is_active: true,
+        timezone: "Asia/Shanghai",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    });
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<div>Home</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getAllByRole("link", { name: "知识库管理" }).length).toBeGreaterThan(0);
+    unmount();
+
+    useAuthStore.setState({
+      user: {
+        id: "user-2",
+        email: "user@example.test",
+        display_name: "User",
+        role: "user",
+        is_active: true,
+        timezone: "Asia/Shanghai",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<div>Home</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("link", { name: "知识库管理" })).not.toBeInTheDocument();
+  });
 });

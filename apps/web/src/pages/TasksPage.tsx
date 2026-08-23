@@ -16,6 +16,7 @@ const TASK_CATEGORIES = [
   { value: "agent", label: "Agent" },
   { value: "wiki_update", label: "Wiki 生成" },
   { value: "wiki_health", label: "Wiki 健康检查" },
+  { value: "knowledge_base", label: "知识库管理" },
 ] as const;
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -23,6 +24,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   "agent.run": "Agent 运行",
   "wiki.update": "Wiki 生成 / 更新",
   "wiki.health": "Wiki 健康检查",
+  "knowledge_base.delete": "删除知识库",
 };
 
 export function TasksPage() {
@@ -51,7 +53,7 @@ export function TasksPage() {
       <PageHeader
         eyebrow="Operations"
         title="任务中心"
-        description="文档、OCR、Agent 与 Wiki 任务的数据库真实状态。"
+        description="文档、OCR、Agent、Wiki 与知识库维护任务的数据库真实状态。"
         actions={
           <Button variant="secondary" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw size={15} />

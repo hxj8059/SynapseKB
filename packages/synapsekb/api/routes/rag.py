@@ -95,7 +95,8 @@ async def _stream_answer(
             (
                 await session.scalars(
                     select(KnowledgeBase).where(
-                        KnowledgeBase.id.in_(payload.knowledge_base_ids)
+                        KnowledgeBase.id.in_(payload.knowledge_base_ids),
+                        KnowledgeBase.lifecycle_status == "active",
                     )
                 )
             ).all()

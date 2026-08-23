@@ -96,6 +96,9 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(160), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
     visibility: Mapped[str] = mapped_column(String(20), default="users", index=True)
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(32), default="active", index=True
+    )
     embedding_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("models.id", ondelete="SET NULL")
     )
@@ -131,6 +134,29 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     members: Mapped[list[KnowledgeBaseMember]] = relationship(
         back_populates="knowledge_base", cascade="all, delete-orphan"
     )
+
+
+class KnowledgeBaseDeletionJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "knowledge_base_deletion_jobs"
+
+    knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("knowledge_bases.id", ondelete="SET NULL"), index=True
+    )
+    knowledge_base_snapshot_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    knowledge_base_name: Mapped[str] = mapped_column(String(160))
+    requested_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    stage: Mapped[str | None] = mapped_column(String(80))
+    progress: Mapped[float] = mapped_column(Float, default=0)
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_object_count: Mapped[int] = mapped_column(Integer, default=0)
+    deleted_object_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_summary: Mapped[str | None] = mapped_column(String(1000))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class KnowledgeBaseMember(Base):

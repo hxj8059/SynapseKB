@@ -28,11 +28,17 @@ def test_initial_migration_with_pgvector() -> None:
                 assert connection.scalar(text("SELECT count(*) FROM users")) == 0
                 assert (
                     connection.scalar(text("SELECT version_num FROM alembic_version"))
-                    == "0014_wiki_doc_states"
+                    == "0015_kb_deletion"
                 )
                 assert (
                     connection.scalar(text("SELECT to_regclass('wiki_document_states')"))
                     == "wiki_document_states"
+                )
+                assert (
+                    connection.scalar(
+                        text("SELECT to_regclass('knowledge_base_deletion_jobs')")
+                    )
+                    == "knowledge_base_deletion_jobs"
                 )
         finally:
             if previous is None:

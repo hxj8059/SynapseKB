@@ -15,17 +15,21 @@ def require_admin(user: User) -> None:
 
 
 def knowledge_base_access_clause(user: User) -> ColumnElement[bool]:
+    active = KnowledgeBase.lifecycle_status == "active"
     if user.role == "admin":
-        return true()
-    return or_(
-        KnowledgeBase.visibility == "all",
-        exists(
-            select(KnowledgeBaseMember.user_id).where(
-                and_(
-                    KnowledgeBaseMember.knowledge_base_id == KnowledgeBase.id,
-                    KnowledgeBaseMember.user_id == user.id,
+        return and_(active, true())
+    return and_(
+        active,
+        or_(
+            KnowledgeBase.visibility == "all",
+            exists(
+                select(KnowledgeBaseMember.user_id).where(
+                    and_(
+                        KnowledgeBaseMember.knowledge_base_id == KnowledgeBase.id,
+                        KnowledgeBaseMember.user_id == user.id,
+                    )
                 )
-            )
+            ),
         ),
     )
 
@@ -46,6 +50,11 @@ async def require_knowledge_base_access(
         KnowledgeBase.id == knowledge_base_id,
         knowledge_base_access_clause(user),
     )
+    if write:
+        # Hold a shared row lock for the whole write transaction. Knowledge-base
+        # deletion takes FOR UPDATE, so it cannot race an upload that has passed
+        # authorization but has not committed its object key yet.
+        query = query.with_for_update(read=True, key_share=True)
     knowledge_base = await session.scalar(query)
     if knowledge_base is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权访问")

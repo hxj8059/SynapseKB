@@ -86,7 +86,8 @@ flowchart LR
   C --> O
 ```
 
-API 负责短请求、认证和权限；Dramatiq Worker 负责解析、OCR、Embedding 和 Wiki 长任务；
+API 负责短请求、认证和权限；Dramatiq Worker 负责解析、OCR、Embedding、Wiki 和知识库清理长任务，
+低频的知识库清理由 Document Worker 的独立维护队列执行；
 Agent Runner 负责 LangGraph 执行；PostgreSQL 保存业务真值与向量，Redis 用于队列、事件、
 取消信号和限流。更详细的决策见[架构说明](docs/architecture.md)。
 
@@ -218,7 +219,7 @@ Remote Streamable HTTP MCP 示例：
 apps/
   api/                  FastAPI 入口
   agent_runner/         LangGraph Agent 执行进程
-  document_worker/      文档解析、分块与 Embedding
+  document_worker/      文档解析、Embedding 与低频维护任务
   ocr_worker/           PaddleOCR 云任务轮询
   wiki_worker/          Wiki 生成、维护与调度
   mcp_server/           Remote Streamable HTTP MCP

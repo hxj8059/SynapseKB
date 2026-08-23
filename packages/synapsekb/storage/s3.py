@@ -59,6 +59,24 @@ class S3ObjectStorage:
         async with self.session.client("s3", **self.options) as client:
             await client.delete_object(Bucket=self.bucket, Key=self.config.object_key(key))
 
+    async def delete_many(self, keys: list[str]) -> None:
+        if not keys:
+            return
+        if len(keys) > 1000:
+            raise ValueError("S3 批量删除每次最多支持 1000 个对象")
+        async with self.session.client("s3", **self.options) as client:
+            response = await client.delete_objects(
+                Bucket=self.bucket,
+                Delete={
+                    "Objects": [{"Key": self.config.object_key(key)} for key in keys],
+                    "Quiet": True,
+                },
+            )
+        errors = response.get("Errors") or []
+        if errors:
+            codes = sorted({str(item.get("Code") or "unknown") for item in errors})
+            raise RuntimeError(f"对象存储批量删除失败：{', '.join(codes)}")
+
     async def exists(self, key: str) -> bool:
         async with self.session.client("s3", **self.options) as client:
             try:

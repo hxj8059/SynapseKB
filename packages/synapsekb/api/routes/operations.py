@@ -9,6 +9,7 @@ from synapsekb.auth.policy import require_admin
 from synapsekb.database.models import (
     AgentRun,
     AuditLog,
+    KnowledgeBaseDeletionJob,
     ProcessingJob,
     ProviderModel,
     WikiHealthJob,
@@ -26,7 +27,7 @@ async def list_tasks(
     offset: int = Query(default=0, ge=0, le=100_000),
     category: str = Query(
         default="all",
-        pattern="^(all|document|agent|wiki_update|wiki_health)$",
+        pattern="^(all|document|agent|wiki_update|wiki_health|knowledge_base)$",
     ),
 ) -> list[OperationTaskRead]:
     require_admin(user)
@@ -86,6 +87,20 @@ async def list_tasks(
             ).all()
         )
         if category in {"all", "wiki_health"}
+        else []
+    )
+    knowledge_base_deletions = (
+        list(
+            (
+                await session.scalars(
+                    select(KnowledgeBaseDeletionJob)
+                    .order_by(KnowledgeBaseDeletionJob.created_at.desc())
+                    .offset(query_offset)
+                    .limit(query_limit)
+                )
+            ).all()
+        )
+        if category in {"all", "knowledge_base"}
         else []
     )
     wiki_model_ids = {
@@ -189,6 +204,24 @@ async def list_tasks(
             updated_at=item.updated_at,
         )
         for item in wiki_health
+    )
+    tasks.extend(
+        OperationTaskRead(
+            id=item.id,
+            task_type="knowledge_base.delete",
+            resource_id=item.knowledge_base_snapshot_id,
+            status=item.status,
+            stage=item.stage,
+            progress=item.progress,
+            summary=(
+                f"{item.knowledge_base_name} · {item.document_count} 份文档 · "
+                f"已清理 {item.deleted_object_count}/{item.total_object_count} 个对象"
+            ),
+            error_summary=item.error_summary,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+        for item in knowledge_base_deletions
     )
     ordered = sorted(tasks, key=lambda item: item.created_at, reverse=True)
     return ordered[offset : offset + limit] if category == "all" else ordered

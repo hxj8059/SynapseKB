@@ -190,7 +190,10 @@ async def _search(
     knowledge_bases = list(
         (
             await context.session.scalars(
-                select(KnowledgeBase).where(KnowledgeBase.id.in_(context.knowledge_base_ids))
+                select(KnowledgeBase).where(
+                    KnowledgeBase.id.in_(context.knowledge_base_ids),
+                    KnowledgeBase.lifecycle_status == "active",
+                )
             )
         ).all()
     )

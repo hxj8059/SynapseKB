@@ -20,6 +20,7 @@ export type KnowledgeBase = {
   name: string;
   description: string;
   visibility: "all" | "users";
+  lifecycle_status: "active" | "deleting" | "deletion_failed";
   embedding_model_id: string | null;
   embedding_dimensions: number;
   rag_chat_model_id: string | null;
@@ -35,6 +36,37 @@ export type KnowledgeBase = {
   wiki_generation_prompt: string;
   created_at: string;
   updated_at: string;
+};
+
+export type KnowledgeBaseDeletionJob = {
+  id: string;
+  knowledge_base_id: string | null;
+  knowledge_base_snapshot_id: string;
+  knowledge_base_name: string;
+  status: string;
+  stage: string | null;
+  progress: number;
+  document_count: number;
+  total_object_count: number;
+  deleted_object_count: number;
+  error_summary: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
+export type KnowledgeBaseManagementItem = {
+  id: string;
+  name: string;
+  description: string;
+  visibility: "all" | "users";
+  lifecycle_status: "active" | "deleting" | "deletion_failed";
+  document_count: number;
+  ready_document_count: number;
+  total_size_bytes: number;
+  created_at: string;
+  updated_at: string;
+  deletion_job: KnowledgeBaseDeletionJob | null;
 };
 
 export type Document = {

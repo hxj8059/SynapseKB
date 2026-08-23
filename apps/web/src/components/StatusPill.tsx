@@ -10,6 +10,10 @@ const tones: Record<string, string> = {
   queued: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   uploaded: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   processing: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  active: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  deleting: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  waiting_tasks: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  deletion_failed: "bg-red-500/10 text-red-600 dark:text-red-400",
 };
 
 export function StatusPill({ status }: { status: string }) {

@@ -36,6 +36,10 @@ class LocalObjectStorage:
         if path.exists():
             path.unlink()
 
+    async def delete_many(self, keys: list[str]) -> None:
+        for key in keys:
+            await self.delete(key)
+
     async def exists(self, key: str) -> bool:
         return self._path(key).is_file()
 

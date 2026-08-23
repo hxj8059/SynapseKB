@@ -7,8 +7,12 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import selectinload
 
+from apps.document_worker.maintenance_actors import delete_knowledge_base
 from synapsekb.api.schemas import (
     KnowledgeBaseCreate,
+    KnowledgeBaseDeletionJobRead,
+    KnowledgeBaseDeletionRequest,
+    KnowledgeBaseManagementItem,
     KnowledgeBaseOverview,
     KnowledgeBaseOverviewItem,
     KnowledgeBaseRead,
@@ -21,6 +25,7 @@ from synapsekb.database.models import (
     AuditLog,
     Document,
     KnowledgeBase,
+    KnowledgeBaseDeletionJob,
     KnowledgeBaseMember,
     ProviderModel,
     User,
@@ -267,6 +272,154 @@ async def create_knowledge_base(
     return knowledge_base
 
 
+@router.get("/management", response_model=list[KnowledgeBaseManagementItem])
+async def manage_knowledge_bases(
+    user: CurrentUser,
+    session: DatabaseSession,
+) -> list[KnowledgeBaseManagementItem]:
+    require_admin(user)
+    rows = (
+        await session.execute(
+            select(
+                KnowledgeBase,
+                func.count(Document.id).label("document_count"),
+                func.count(
+                    case((Document.status == "ready", Document.id), else_=None)
+                ).label("ready_document_count"),
+                func.coalesce(func.sum(Document.size_bytes), 0).label("total_size_bytes"),
+            )
+            .outerjoin(Document, Document.knowledge_base_id == KnowledgeBase.id)
+            .group_by(KnowledgeBase.id)
+            .order_by(KnowledgeBase.created_at.desc())
+        )
+    ).all()
+    knowledge_base_ids = [knowledge_base.id for knowledge_base, *_ in rows]
+    deletion_jobs = (
+        list(
+            (
+                await session.scalars(
+                    select(KnowledgeBaseDeletionJob)
+                    .where(
+                        KnowledgeBaseDeletionJob.knowledge_base_snapshot_id.in_(
+                            knowledge_base_ids
+                        )
+                    )
+                    .order_by(KnowledgeBaseDeletionJob.created_at.desc())
+                )
+            ).all()
+        )
+        if knowledge_base_ids
+        else []
+    )
+    latest_jobs: dict[uuid.UUID, KnowledgeBaseDeletionJob] = {}
+    for job in deletion_jobs:
+        latest_jobs.setdefault(job.knowledge_base_snapshot_id, job)
+    return [
+        KnowledgeBaseManagementItem(
+            id=knowledge_base.id,
+            name=knowledge_base.name,
+            description=knowledge_base.description,
+            visibility=knowledge_base.visibility,
+            lifecycle_status=knowledge_base.lifecycle_status,
+            document_count=int(document_count),
+            ready_document_count=int(ready_document_count),
+            total_size_bytes=int(total_size_bytes),
+            created_at=knowledge_base.created_at,
+            updated_at=knowledge_base.updated_at,
+            deletion_job=(
+                KnowledgeBaseDeletionJobRead.model_validate(latest_jobs[knowledge_base.id])
+                if knowledge_base.id in latest_jobs
+                else None
+            ),
+        )
+        for knowledge_base, document_count, ready_document_count, total_size_bytes in rows
+    ]
+
+
+@router.delete(
+    "/{knowledge_base_id}",
+    response_model=KnowledgeBaseDeletionJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def delete_knowledge_base_request(
+    knowledge_base_id: uuid.UUID,
+    payload: KnowledgeBaseDeletionRequest,
+    user: CurrentUser,
+    session: DatabaseSession,
+) -> KnowledgeBaseDeletionJob:
+    require_admin(user)
+    knowledge_base = await session.scalar(
+        select(KnowledgeBase)
+        .where(KnowledgeBase.id == knowledge_base_id)
+        .with_for_update()
+    )
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    if payload.confirmation_name != knowledge_base.name:
+        raise HTTPException(status_code=422, detail="输入的知识库名称不匹配")
+    active_job = await session.scalar(
+        select(KnowledgeBaseDeletionJob)
+        .where(
+            KnowledgeBaseDeletionJob.knowledge_base_snapshot_id == knowledge_base.id,
+            KnowledgeBaseDeletionJob.status.in_({"queued", "running", "waiting_tasks"}),
+        )
+        .order_by(KnowledgeBaseDeletionJob.created_at.desc())
+    )
+    if active_job is not None:
+        return active_job
+    if knowledge_base.lifecycle_status not in {"active", "deletion_failed"}:
+        raise HTTPException(status_code=409, detail="知识库当前状态不允许删除")
+    document_count, parsed_count = (
+        await session.execute(
+            select(
+                func.count(Document.id),
+                func.count(Document.parsed_text_key),
+            ).where(Document.knowledge_base_id == knowledge_base.id)
+        )
+    ).one()
+    job = KnowledgeBaseDeletionJob(
+        knowledge_base_id=knowledge_base.id,
+        knowledge_base_snapshot_id=knowledge_base.id,
+        knowledge_base_name=knowledge_base.name,
+        requested_by_id=user.id,
+        status="queued",
+        stage="queued",
+        progress=0,
+        document_count=int(document_count),
+        total_object_count=int(document_count) + int(parsed_count),
+        deleted_object_count=0,
+        metadata_json={},
+    )
+    knowledge_base.lifecycle_status = "deleting"
+    session.add(job)
+    session.add(
+        AuditLog(
+            actor_user_id=user.id,
+            action="knowledge_base.delete_requested",
+            resource_type="knowledge_base",
+            resource_id=knowledge_base.id,
+            metadata_json={
+                "name": knowledge_base.name,
+                "document_count": int(document_count),
+            },
+            created_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    await session.refresh(job)
+    try:
+        delete_knowledge_base.send(str(job.id))
+    except Exception as exc:
+        job.status = "failed"
+        job.stage = "enqueue_failed"
+        job.error_summary = f"删除任务入队失败：{type(exc).__name__}"[:1000]
+        job.finished_at = datetime.now(UTC)
+        knowledge_base.lifecycle_status = "deletion_failed"
+        await session.commit()
+        raise HTTPException(status_code=503, detail="删除任务入队失败，请稍后重试") from exc
+    return job
+
+
 @router.get("/{knowledge_base_id}", response_model=KnowledgeBaseRead)
 async def get_knowledge_base(
     knowledge_base_id: uuid.UUID,
@@ -295,9 +448,15 @@ async def update_knowledge_base(
     session: DatabaseSession,
 ) -> KnowledgeBase:
     require_admin(user)
-    knowledge_base = await session.get(KnowledgeBase, knowledge_base_id)
+    knowledge_base = await session.scalar(
+        select(KnowledgeBase)
+        .where(KnowledgeBase.id == knowledge_base_id)
+        .with_for_update()
+    )
     if knowledge_base is None:
         raise HTTPException(status_code=404, detail="知识库不存在")
+    if knowledge_base.lifecycle_status != "active":
+        raise HTTPException(status_code=409, detail="知识库正在删除，不能修改")
     supplied = payload.model_fields_set
     if "name" in supplied and payload.name is not None:
         knowledge_base.name = payload.name

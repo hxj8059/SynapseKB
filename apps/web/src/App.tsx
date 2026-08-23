@@ -30,6 +30,11 @@ const KnowledgeBasesPage = lazy(() =>
     default: module.KnowledgeBasesPage,
   })),
 );
+const KnowledgeBaseManagementPage = lazy(() =>
+  import("./pages/KnowledgeBaseManagementPage").then((module) => ({
+    default: module.KnowledgeBaseManagementPage,
+  })),
+);
 const LoginPage = lazy(() =>
   import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })),
 );
@@ -110,6 +115,10 @@ export default function App() {
             <Route path="tokens" element={<TokensPage />} />
             <Route path="skills" element={<SkillsPage />} />
             <Route element={<AdminOnly />}>
+              <Route
+                path="admin/knowledge-bases"
+                element={<KnowledgeBaseManagementPage />}
+              />
               <Route path="admin/models" element={<ModelsPage />} />
               <Route path="admin/ocr" element={<OcrSettingsPage />} />
               <Route path="admin/storage" element={<StorageSettingsPage />} />

@@ -46,7 +46,7 @@ async def schedule_wiki_update(
         should_send = queued is None
         if queued is None:
             knowledge_base = await session.get(KnowledgeBase, knowledge_base_id)
-            if knowledge_base is None:
+            if knowledge_base is None or knowledge_base.lifecycle_status != "active":
                 return
             try:
                 model = await resolve_wiki_model(session, knowledge_base)
@@ -66,7 +66,7 @@ async def schedule_wiki_update(
             queued.affected_document_ids = list({*queued.affected_document_ids, document_id})
             if queued.model_id is None:
                 knowledge_base = await session.get(KnowledgeBase, knowledge_base_id)
-                if knowledge_base is None:
+                if knowledge_base is None or knowledge_base.lifecycle_status != "active":
                     return
                 try:
                     model = await resolve_wiki_model(session, knowledge_base)

@@ -134,6 +134,7 @@ class KnowledgeBaseRead(ORMModel):
     name: str
     description: str
     visibility: str
+    lifecycle_status: str
     embedding_model_id: uuid.UUID | None
     embedding_dimensions: int
     rag_chat_model_id: uuid.UUID | None
@@ -149,6 +150,41 @@ class KnowledgeBaseRead(ORMModel):
     wiki_generation_prompt: str
     created_at: datetime
     updated_at: datetime
+
+
+class KnowledgeBaseDeletionRequest(BaseModel):
+    confirmation_name: str = Field(min_length=1, max_length=160)
+
+
+class KnowledgeBaseDeletionJobRead(ORMModel):
+    id: uuid.UUID
+    knowledge_base_id: uuid.UUID | None
+    knowledge_base_snapshot_id: uuid.UUID
+    knowledge_base_name: str
+    status: str
+    stage: str | None
+    progress: float
+    document_count: int
+    total_object_count: int
+    deleted_object_count: int
+    error_summary: str | None
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+
+class KnowledgeBaseManagementItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str
+    visibility: str
+    lifecycle_status: str
+    document_count: int
+    ready_document_count: int
+    total_size_bytes: int
+    created_at: datetime
+    updated_at: datetime
+    deletion_job: KnowledgeBaseDeletionJobRead | None = None
 
 
 class KnowledgeBaseUpdate(BaseModel):
