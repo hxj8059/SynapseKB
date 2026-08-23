@@ -19,10 +19,21 @@ def test_initial_migration_with_pgvector() -> None:
         os.environ["DATABASE_URL"] = url
         get_settings.cache_clear()
         try:
-            command.upgrade(Config("alembic.ini"), "head")
+            config = Config("alembic.ini")
+            command.upgrade(config, "head")
+            command.downgrade(config, "0013_agent_tool_tokens")
+            command.upgrade(config, "head")
             sync_url = url.replace("+asyncpg", "+psycopg")
             with create_engine(sync_url).connect() as connection:
                 assert connection.scalar(text("SELECT count(*) FROM users")) == 0
+                assert (
+                    connection.scalar(text("SELECT version_num FROM alembic_version"))
+                    == "0014_wiki_doc_states"
+                )
+                assert (
+                    connection.scalar(text("SELECT to_regclass('wiki_document_states')"))
+                    == "wiki_document_states"
+                )
         finally:
             if previous is None:
                 os.environ.pop("DATABASE_URL", None)

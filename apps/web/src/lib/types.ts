@@ -348,6 +348,9 @@ export type WikiJob = {
   space_id: string;
   model_id: string | null;
   status: string;
+  generation_mode: "incremental" | "rebuild";
+  trigger: "automatic" | "manual" | "retry";
+  retry_of_job_id: string | null;
   generation_id: string;
   affected_document_ids: string[];
   candidate_version: number | null;

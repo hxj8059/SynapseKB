@@ -234,12 +234,25 @@ export function WikiPage() {
       client.invalidateQueries({ queryKey: ["wiki-index", knowledgeBaseId] });
     }
   }, [client, job?.status, knowledgeBaseId]);
-  const generate = useMutation({
+  const incrementalUpdate = useMutation({
     mutationFn: () =>
       api<WikiJob>("/wiki/generate", {
         method: "POST",
         body: JSON.stringify({
           knowledge_base_id: knowledgeBaseId,
+          mode: "incremental",
+          document_ids: [],
+        }),
+      }),
+    onSuccess: (created) => setJobId(created.id),
+  });
+  const rebuild = useMutation({
+    mutationFn: () =>
+      api<WikiJob>("/wiki/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          knowledge_base_id: knowledgeBaseId,
+          mode: "rebuild",
           document_ids: [],
         }),
       }),
@@ -422,11 +435,38 @@ export function WikiPage() {
                   健康检查
                 </Button>
                 <Button
-                  onClick={() => generate.mutate()}
-                  disabled={!knowledgeBaseId || generate.isPending}
+                  variant="secondary"
+                  onClick={() => {
+                    if (
+                      indexData &&
+                      !window.confirm(
+                        "重建会重新分析全部就绪文档，并在检查通过后原子替换当前 Wiki。确认继续吗？",
+                      )
+                    ) {
+                      return;
+                    }
+                    rebuild.mutate();
+                  }}
+                  disabled={
+                    !knowledgeBaseId ||
+                    rebuild.isPending ||
+                    incrementalUpdate.isPending
+                  }
                 >
                   <RefreshCw size={15} />
-                  生成/更新
+                  新建 / 重建
+                </Button>
+                <Button
+                  onClick={() => incrementalUpdate.mutate()}
+                  disabled={
+                    !knowledgeBaseId ||
+                    !indexData ||
+                    rebuild.isPending ||
+                    incrementalUpdate.isPending
+                  }
+                >
+                  <RefreshCw size={15} />
+                  增量更新
                 </Button>
               </>
             )}
@@ -449,9 +489,9 @@ export function WikiPage() {
           )}
         </Card>
       )}
-      {generate.error && (
+      {(incrementalUpdate.error || rebuild.error) && (
         <p className="mb-5 rounded-xl bg-red-500/10 p-3 text-sm text-red-500">
-          {generate.error.message}
+          {(incrementalUpdate.error || rebuild.error)?.message}
         </p>
       )}
       {showHealth && user?.role === "admin" && (

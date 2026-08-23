@@ -30,6 +30,13 @@ from synapsekb.models.provider import (
     OpenAICompatibleProvider,
     create_provider,
 )
+from synapsekb.wiki.document_state import (
+    job_expected_document_ids,
+    mark_job_documents_failed,
+    mark_job_documents_pending,
+    mark_job_documents_running,
+    mark_job_documents_succeeded,
+)
 from synapsekb.wiki.entity_resolution import (
     HistoricalWikiNode,
     WikiHistoryResolver,
@@ -167,6 +174,7 @@ async def _generate_document_graph(
 
 async def generate_wiki_job(job_id: uuid.UUID) -> None:
     async with AsyncSessionFactory() as session:
+        selected_document_ids: list[uuid.UUID] = []
         job = await session.get(WikiUpdateJob, job_id)
         if job is None or job.status == "published":
             return
@@ -178,12 +186,25 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
         )
         if knowledge_base is None:
             raise RuntimeError("知识库不存在")
-        model = await resolve_wiki_model(session, knowledge_base, job)
-        if job.model_id is None:
-            job.model_id = model.id
-        provider = create_provider(model)
-        if isinstance(provider, DeterministicMockProvider):
-            raise RuntimeError("Mock Provider 不支持 Wiki 生成")
+        try:
+            model = await resolve_wiki_model(session, knowledge_base, job)
+            if job.model_id is None:
+                job.model_id = model.id
+            provider = create_provider(model)
+            if isinstance(provider, DeterministicMockProvider):
+                raise RuntimeError("Mock Provider 不支持 Wiki 生成")
+        except Exception as exc:
+            error_summary = f"{type(exc).__name__}: {exc}"[:1000]
+            job.status = "failed"
+            job.error_summary = error_summary
+            await mark_job_documents_failed(
+                session,
+                job=job,
+                document_ids=job_expected_document_ids(job),
+                error_summary=error_summary,
+            )
+            await session.commit()
+            raise
         initial_quality_report = dict(job.quality_report)
         recovery_count = int(initial_quality_report.get("recovery_count", 0) or 0)
         if job.status == "running":
@@ -214,6 +235,9 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
             documents = list((await session.scalars(document_query)).all())
             if not documents:
                 raise RuntimeError("没有可用于 Wiki 的文档")
+            selected_document_ids = [document.id for document in documents]
+            await mark_job_documents_running(session, job=job, documents=documents)
+            await session.commit()
             existing_pages = list(
                 (
                     await session.scalars(
@@ -274,6 +298,7 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                 await session.refresh(job)
                 if job.cancel_requested_at is not None:
                     job.status = "cancelled"
+                    await mark_job_documents_pending(session, job_id=job.id)
                     await session.commit()
                     return
                 all_chunks = list(
@@ -421,12 +446,12 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                                     "document_title": document.title,
                                     "batch_index": batch_index,
                                     "recovery_batch_count": len(recovery_batches),
-                                    "retry_error": (
-                                        f"{type(retry_exc).__name__}: {retry_exc}"
-                                    )[:500],
-                                    "first_error": (
-                                        f"{type(first_exc).__name__}: {first_exc}"
-                                    )[:500],
+                                    "retry_error": (f"{type(retry_exc).__name__}: {retry_exc}")[
+                                        :500
+                                    ],
+                                    "first_error": (f"{type(first_exc).__name__}: {first_exc}")[
+                                        :500
+                                    ],
                                 }
                             )
                             logger.warning(
@@ -555,9 +580,7 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                         "recovery_batch_count": document_recovery_batches,
                         "produced_node_count": produced_node_count,
                         "produced_relation_count": produced_relation_count,
-                        "status": (
-                            "processed" if produced_node_count else "processed_no_entity"
-                        ),
+                        "status": ("processed" if produced_node_count else "processed_no_entity"),
                     }
                 )
                 job.quality_report = {
@@ -596,6 +619,7 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
                 }
                 job.candidate_version = space.published_version
                 job.status = "published"
+                await mark_job_documents_succeeded(session, job_id=job.id)
                 await session.commit()
                 return
             relations_by_source: dict[str, list[_RelationAggregate]] = {}
@@ -777,9 +801,17 @@ async def generate_wiki_job(job_id: uuid.UUID) -> None:
         except Exception as exc:
             await session.rollback()
             job = await session.get(WikiUpdateJob, job_id)
-            if job and job.status not in {"published", "cancelled", "quality_failed"}:
-                job.status = "failed"
-                job.error_summary = f"{type(exc).__name__}: {exc}"[:1000]
+            if job and job.status not in {"published", "cancelled"}:
+                error_summary = f"{type(exc).__name__}: {exc}"[:1000]
+                if job.status != "quality_failed":
+                    job.status = "failed"
+                    job.error_summary = error_summary
+                await mark_job_documents_failed(
+                    session,
+                    job=job,
+                    document_ids=selected_document_ids or job_expected_document_ids(job),
+                    error_summary=error_summary,
+                )
                 await session.commit()
             raise
         finally:

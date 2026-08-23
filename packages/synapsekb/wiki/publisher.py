@@ -18,6 +18,10 @@ from synapsekb.database.models import (
     WikiSpace,
     WikiUpdateJob,
 )
+from synapsekb.wiki.document_state import (
+    mark_job_documents_pending,
+    mark_job_documents_succeeded,
+)
 from synapsekb.wiki.entity_resolution import ensure_page_node_embeddings
 
 logger = structlog.get_logger()
@@ -42,6 +46,7 @@ async def publish_generation(
         return
     if job.cancel_requested_at is not None:
         job.status = "cancelled"
+        await mark_job_documents_pending(session, job_id=job.id)
         await session.commit()
         return
     space = await session.scalar(
@@ -176,6 +181,7 @@ async def publish_generation(
     await _rebuild_generation_graph(session, space, versions)
     space.published_version = job.candidate_version
     job.status = "published"
+    await mark_job_documents_succeeded(session, job_id=job.id)
     await session.commit()
 
     # The published page switch and graph replacement above must not depend on
@@ -186,9 +192,7 @@ async def publish_generation(
         knowledge_base = await session.get(KnowledgeBase, space.knowledge_base_id)
         pages = list(
             (
-                await session.scalars(
-                    select(WikiPage).where(WikiPage.id.in_(candidate_page_ids))
-                )
+                await session.scalars(select(WikiPage).where(WikiPage.id.in_(candidate_page_ids)))
             ).all()
         )
         nodes = list(

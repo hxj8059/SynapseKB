@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { Activity, RefreshCw } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Activity, RefreshCw, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
@@ -41,6 +41,11 @@ export function TasksPage() {
         ? 3000
         : false,
   });
+  const retryFailedWikiDocuments = useMutation({
+    mutationFn: (taskId: string) =>
+      api(`/wiki/jobs/${taskId}/retry-failed`, { method: "POST" }),
+    onSuccess: () => refetch(),
+  });
   return (
     <>
       <PageHeader
@@ -80,7 +85,7 @@ export function TasksPage() {
             {tasks.map((task) => (
               <div
                 key={`${task.task_type}-${task.id}`}
-                className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_160px_100px_180px] md:items-center"
+                className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_140px_100px_170px_auto] md:items-center"
               >
                 <div>
                   <div className="text-sm font-semibold">
@@ -119,6 +124,26 @@ export function TasksPage() {
                 <span className="text-xs text-[var(--muted)]">
                   {new Date(task.updated_at).toLocaleString("zh-CN")}
                 </span>
+                <div className="min-w-36 md:text-right">
+                  {task.task_type === "wiki.update" &&
+                  ["failed", "quality_failed"].includes(task.status) ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={retryFailedWikiDocuments.isPending}
+                      onClick={() => retryFailedWikiDocuments.mutate(task.id)}
+                    >
+                      <RotateCcw size={14} />
+                      重试失败文档
+                    </Button>
+                  ) : null}
+                  {retryFailedWikiDocuments.isError &&
+                  retryFailedWikiDocuments.variables === task.id ? (
+                    <p className="mt-2 text-xs text-red-500">
+                      {retryFailedWikiDocuments.error.message}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

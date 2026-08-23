@@ -44,6 +44,11 @@ from synapsekb.database.models import (
     WikiUpdateJob,
 )
 from synapsekb.domain.enums import TimeField
+from synapsekb.wiki.document_state import (
+    incremental_documents,
+    mark_documents_pending,
+    retryable_documents,
+)
 from synapsekb.wiki.health import (
     add_wiki_page_relation,
     mark_wiki_pages_distinct,
@@ -870,6 +875,58 @@ async def start_wiki_generation(
     knowledge_base = await session.get(KnowledgeBase, payload.knowledge_base_id)
     if knowledge_base is None:
         raise HTTPException(status_code=404, detail="知识库不存在")
+    documents: list[Document] = []
+    generation_mode = payload.mode
+    if payload.mode == "rebuild":
+        if payload.document_ids:
+            raise HTTPException(status_code=422, detail="全量重建不能同时指定文档")
+        ready_count = await session.scalar(
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.knowledge_base_id == knowledge_base.id,
+                Document.status == "ready",
+            )
+        )
+        if not ready_count:
+            raise HTTPException(status_code=409, detail="没有可用于 Wiki 的就绪文档")
+    elif payload.document_ids:
+        requested_ids = list(dict.fromkeys(payload.document_ids))
+        documents = list(
+            (
+                await session.scalars(
+                    select(Document)
+                    .where(
+                        Document.id.in_(requested_ids),
+                        Document.knowledge_base_id == knowledge_base.id,
+                        Document.status == "ready",
+                    )
+                    .order_by(Document.created_at, Document.id)
+                )
+            ).all()
+        )
+        if {document.id for document in documents} != set(requested_ids):
+            raise HTTPException(status_code=422, detail="包含不存在、未就绪或属于其他知识库的文档")
+    elif space.published_version is None:
+        generation_mode = "rebuild"
+        ready_count = await session.scalar(
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.knowledge_base_id == knowledge_base.id,
+                Document.status == "ready",
+            )
+        )
+        if not ready_count:
+            raise HTTPException(status_code=409, detail="没有可用于 Wiki 的就绪文档")
+    else:
+        documents = await incremental_documents(
+            session,
+            space_id=space.id,
+            knowledge_base_id=knowledge_base.id,
+        )
+        if not documents:
+            raise HTTPException(status_code=409, detail="Wiki 已是最新，没有需要增量处理的文档")
     try:
         model = await resolve_wiki_model(session, knowledge_base)
     except WikiModelConfigurationError as exc:
@@ -888,10 +945,14 @@ async def start_wiki_generation(
         space_id=space.id,
         model_id=model.id,
         status="queued",
+        generation_mode=generation_mode,
+        trigger="manual",
         generation_id=uuid.uuid4(),
-        affected_document_ids=payload.document_ids,
+        affected_document_ids=[document.id for document in documents],
     )
     session.add(job)
+    if documents:
+        await mark_documents_pending(session, space_id=space.id, documents=documents)
     await session.commit()
     generate_wiki.send(str(job.id))
     return job
@@ -940,6 +1001,70 @@ async def cancel_wiki_job(
     job.cancel_requested_at = datetime.now(UTC)
     await session.commit()
     return job
+
+
+@router.post(
+    "/jobs/{job_id}/retry-failed",
+    response_model=WikiJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_failed_wiki_documents(
+    job_id: uuid.UUID,
+    user: CurrentUser,
+    session: DatabaseSession,
+) -> WikiUpdateJob:
+    failed_job = await _wiki_job(job_id, user, session, write=True)
+    if failed_job.status not in {"failed", "quality_failed"}:
+        raise HTTPException(status_code=409, detail="只有失败的 Wiki 任务可以补跑")
+    space = await session.get(WikiSpace, failed_job.space_id)
+    if space is None:
+        raise HTTPException(status_code=404, detail="Wiki 空间不存在")
+    knowledge_base = await session.get(KnowledgeBase, space.knowledge_base_id)
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    active = await session.scalar(
+        select(WikiUpdateJob)
+        .where(
+            WikiUpdateJob.space_id == space.id,
+            WikiUpdateJob.status.in_(["queued", "running", "quality_check"]),
+        )
+        .with_for_update()
+    )
+    if active is not None:
+        raise HTTPException(status_code=409, detail="该 Wiki 已有进行中的生成任务")
+    documents = await retryable_documents(
+        session,
+        job=failed_job,
+        knowledge_base_id=knowledge_base.id,
+    )
+    if not documents:
+        raise HTTPException(status_code=409, detail="没有可补跑的失败或未完成文档")
+    try:
+        model = await resolve_wiki_model(session, knowledge_base)
+    except WikiModelConfigurationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    retry_job = WikiUpdateJob(
+        space_id=space.id,
+        model_id=model.id,
+        status="queued",
+        generation_mode="incremental",
+        trigger="retry",
+        generation_id=uuid.uuid4(),
+        affected_document_ids=[document.id for document in documents],
+        retry_of_job_id=failed_job.id,
+        quality_report={
+            "retry": {
+                "source_job_id": str(failed_job.id),
+                "document_count": len(documents),
+            }
+        },
+        change_summary=f"准备补跑本批 {len(documents)} 份失败或未完成文档",
+    )
+    session.add(retry_job)
+    await mark_documents_pending(session, space_id=space.id, documents=documents)
+    await session.commit()
+    generate_wiki.send(str(retry_job.id))
+    return retry_job
 
 
 @router.post(

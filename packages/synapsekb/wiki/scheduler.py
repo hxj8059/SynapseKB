@@ -5,8 +5,9 @@ import uuid
 from sqlalchemy import func, select
 
 from apps.wiki_worker.actors import generate_wiki
-from synapsekb.database.models import KnowledgeBase, WikiSpace, WikiUpdateJob
+from synapsekb.database.models import Document, KnowledgeBase, WikiSpace, WikiUpdateJob
 from synapsekb.database.session import AsyncSessionFactory
+from synapsekb.wiki.document_state import mark_documents_pending
 from synapsekb.wiki.model_selection import WikiModelConfigurationError, resolve_wiki_model
 
 WIKI_INCREMENTAL_DOCUMENT_BATCH_SIZE = 20
@@ -27,6 +28,10 @@ async def schedule_wiki_update(
         )
         if space is None:
             return
+        document = await session.get(Document, document_id)
+        if document is None or document.status != "ready":
+            return
+        await mark_documents_pending(session, space_id=space.id, documents=[document])
         queued = await session.scalar(
             select(WikiUpdateJob)
             .where(
@@ -51,6 +56,8 @@ async def schedule_wiki_update(
                 space_id=space.id,
                 model_id=model.id,
                 status="queued",
+                generation_mode="incremental",
+                trigger="automatic",
                 generation_id=uuid.uuid4(),
                 affected_document_ids=[document_id],
             )

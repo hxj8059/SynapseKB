@@ -626,13 +626,44 @@ class WikiUpdateJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Uuid, ForeignKey("models.id", ondelete="SET NULL"), index=True
     )
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    generation_mode: Mapped[str] = mapped_column(String(32), default="incremental", index=True)
+    trigger: Mapped[str] = mapped_column(String(32), default="automatic", index=True)
     generation_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
     affected_document_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(Uuid), default=list)
+    retry_of_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("wiki_update_jobs.id", ondelete="SET NULL"), index=True
+    )
     candidate_version: Mapped[int | None] = mapped_column(Integer)
     quality_report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     change_summary: Mapped[str | None] = mapped_column(Text)
     error_summary: Mapped[str | None] = mapped_column(String(1000))
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WikiDocumentState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "wiki_document_states"
+    __table_args__ = (
+        UniqueConstraint("space_id", "document_id", name="uq_wiki_document_state_space_document"),
+        Index("ix_wiki_document_states_space_status", "space_id", "status"),
+    )
+
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("wiki_spaces.id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    target_document_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_successful_document_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    last_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("wiki_update_jobs.id", ondelete="SET NULL"), index=True
+    )
+    error_summary: Mapped[str | None] = mapped_column(String(1000))
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WikiHealthJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):

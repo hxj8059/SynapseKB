@@ -681,6 +681,7 @@ class WikiPageVersionRead(ORMModel):
 
 class WikiGenerateRequest(BaseModel):
     knowledge_base_id: uuid.UUID
+    mode: Literal["incremental", "rebuild"] = "incremental"
     document_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10_000)
 
 
@@ -699,8 +700,11 @@ class WikiJobRead(ORMModel):
     space_id: uuid.UUID
     model_id: uuid.UUID | None
     status: str
+    generation_mode: str
+    trigger: str
     generation_id: uuid.UUID
     affected_document_ids: list[uuid.UUID]
+    retry_of_job_id: uuid.UUID | None
     candidate_version: int | None
     quality_report: dict[str, Any]
     change_summary: str | None
