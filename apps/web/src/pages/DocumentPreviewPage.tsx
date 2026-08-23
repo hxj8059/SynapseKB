@@ -218,7 +218,7 @@ export function DocumentPreviewPage() {
                   ariaLabel="文档来源时间"
                   value={sourceTime}
                   onValueChange={setSourceTime}
-                  placeholder="来源时间（可选）"
+                  placeholder="来源时间（留空后重新解析可自动识别）"
                 />
                 <Button size="sm" disabled={save.isPending} type="submit">
                   <Save size={13} />

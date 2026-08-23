@@ -28,6 +28,7 @@ export function KnowledgeBaseDetailPage() {
   const [wikiGenerationPrompt, setWikiGenerationPrompt] = useState("");
   const [embeddingModelId, setEmbeddingModelId] = useState("");
   const [ragChatModelId, setRagChatModelId] = useState("");
+  const [sourceTimeChatModelId, setSourceTimeChatModelId] = useState("");
   const [rerankModelId, setRerankModelId] = useState("");
   const [ragMaxOutputTokens, setRagMaxOutputTokens] = useState(8000);
   const [wikiChatModelId, setWikiChatModelId] = useState("");
@@ -68,6 +69,7 @@ export function KnowledgeBaseDetailPage() {
     setWikiGenerationPrompt(knowledgeBase.wiki_generation_prompt);
     setEmbeddingModelId(knowledgeBase.embedding_model_id ?? "");
     setRagChatModelId(knowledgeBase.rag_chat_model_id ?? "");
+    setSourceTimeChatModelId(knowledgeBase.source_time_chat_model_id ?? "");
     setRerankModelId(knowledgeBase.rerank_model_id ?? "");
     setRagMaxOutputTokens(knowledgeBase.rag_max_output_tokens);
     setWikiChatModelId(knowledgeBase.wiki_chat_model_id ?? "");
@@ -88,6 +90,7 @@ export function KnowledgeBaseDetailPage() {
           embedding_model_id: embeddingModelId || null,
           embedding_dimensions: knowledgeBase?.embedding_dimensions,
           rag_chat_model_id: ragChatModelId || null,
+          source_time_chat_model_id: sourceTimeChatModelId || null,
           rerank_model_id: rerankModelId || null,
           rag_max_output_tokens: ragMaxOutputTokens,
           wiki_chat_model_id: wikiChatModelId || null,
@@ -135,7 +138,7 @@ export function KnowledgeBaseDetailPage() {
                   ariaLabel="来源时间"
                   value={sourceTime}
                   onValueChange={setSourceTime}
-                  placeholder="来源时间（可选）"
+                  placeholder="来源时间（留空自动识别）"
                 />
               </div>
               <input
@@ -169,10 +172,10 @@ export function KnowledgeBaseDetailPage() {
           <div>
             <h2 className="font-semibold">模块模型与 Wiki 配置</h2>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-              Embedding 模型与维度在创建知识库时锁定；问答、Agent、Wiki 生成和 Wiki 健康检查可独立选择模型。
+              Embedding 模型与维度在创建知识库时锁定；日期抽取、问答、Wiki 生成和 Wiki 健康检查可独立选择模型。
             </p>
           </div>
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
             <label className="text-sm">
               <span className="mb-1.5 block font-medium">Embedding</span>
               <Select
@@ -196,6 +199,20 @@ export function KnowledgeBaseDetailPage() {
                 value={ragChatModelId}
                 onValueChange={setRagChatModelId}
                 placeholder="请选择"
+                options={models
+                  .filter((model) => model.kind === "chat" && model.is_enabled)
+                  .map((model) => ({ value: model.id, label: model.name, description: model.model_name }))}
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1.5 block font-medium">日期抽取 Chat</span>
+              <Select
+                ariaLabel="日期抽取 Chat 模型"
+                value={sourceTimeChatModelId}
+                onValueChange={setSourceTimeChatModelId}
+                placeholder="不使用模型（规则提取）"
+                clearable
+                clearLabel="不使用模型（规则提取）"
                 options={models
                   .filter((model) => model.kind === "chat" && model.is_enabled)
                   .map((model) => ({ value: model.id, label: model.name, description: model.model_name }))}

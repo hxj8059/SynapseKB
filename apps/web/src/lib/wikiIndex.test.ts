@@ -1,41 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import type { WikiPageSummary } from "./types";
-import { countWikiPageTypes, filterWikiPages } from "./wikiIndex";
-
-function page(title: string, nodeType: string): WikiPageSummary {
-  return {
-    id: title,
-    space_id: "space",
-    parent_id: null,
-    slug: title,
-    title,
-    summary: "",
-    sort_order: 0,
-    source_time: null,
-    current_version_id: "version",
-    is_archived: false,
-    merged_into_page_id: null,
-    node_type: nodeType,
-    created_at: "2026-08-05T00:00:00Z",
-    updated_at: "2026-08-05T00:00:00Z",
-  };
-}
+import { WIKI_INDEX_PAGE_SIZE, wikiIndexPagePath } from "./wikiIndex";
 
 describe("Wiki index navigation", () => {
-  const pages = [page("PCB", "产业主题"), page("沪电股份", "个股"), page("胜宏科技", "个股")];
+  it("builds a bounded server-side page request", () => {
+    const path = wikiIndexPagePath("kb-id", 3, "  胜宏科技  ", "个股");
+    const url = new URL(path, "http://localhost");
 
-  it("counts each node type", () => {
-    expect(countWikiPageTypes(pages)).toEqual([
-      { type: "个股", count: 2 },
-      { type: "产业主题", count: 1 },
-    ]);
+    expect(url.pathname).toBe("/wiki/kb-id/index-page");
+    expect(url.searchParams.get("limit")).toBe(String(WIKI_INDEX_PAGE_SIZE));
+    expect(url.searchParams.get("offset")).toBe(String(WIKI_INDEX_PAGE_SIZE * 2));
+    expect(url.searchParams.get("query")).toBe("胜宏科技");
+    expect(url.searchParams.get("node_type")).toBe("个股");
   });
 
-  it("filters by node type and title", () => {
-    expect(filterWikiPages(pages, "科技", "个股").map((item) => item.title)).toEqual([
-      "胜宏科技",
-    ]);
+  it("omits empty filters and clamps invalid page numbers", () => {
+    const url = new URL(wikiIndexPagePath("kb-id", 0, " ", ""), "http://localhost");
+    expect(url.searchParams.get("offset")).toBe("0");
+    expect(url.searchParams.has("query")).toBe(false);
+    expect(url.searchParams.has("node_type")).toBe(false);
   });
 });
-

@@ -6,6 +6,13 @@
 - 时间：`TIMESTAMPTZ`，数据库保存绝对时间，展示按用户时区转换。
 - `created_at`/`updated_at` 由服务端维护；文档内容性变更必须更新 `updated_at`。
 - 可筛选实体的 `source_time` 可空。不得用 `created_at` 回填。
+- 文档未显式提供 `source_time` 时，如果知识库配置了“日期抽取 Chat 模型”，处理器只发送
+  文件名、标题，以及首个逻辑页面的开头和末尾版式信息（合计最多 1,000 字符），要求模型
+  返回日期、原文证据或 `NULL`。证券研究报告优先识别封面页眉中的报告日期，并排除正文事件
+  日期和“下载/仅供使用/请勿传阅”水印日期。
+  返回日期必须有可由代码在输入中验证的逐字证据；模型明确判断未知时保持 `NULL`，模型调用
+  或结构化输出异常时才回退到文件名、标题和正文开头的确定性规则。OCR 与普通解析使用相同流程，
+  日期抽取失败不会阻塞后续分块和索引，也绝不使用 `created_at` 回填。
 - API Key 使用 AES-256-GCM 密文；PAT 和 Refresh Token 只保存 SHA-256 Hash。
 - 删除知识库/文档使用明确级联；审计记录不级联删除。
 
@@ -16,7 +23,7 @@
 | `users` | email 唯一、password_hash、role、is_active |
 | `refresh_tokens` | token_hash 唯一、user_id、expires_at、revoked_at |
 | `personal_access_tokens` | token_hash 唯一、scopes、expires_at、revoked_at、last_used_at |
-| `knowledge_bases` | name、visibility、embedding_model_id、wiki_chat_model_id、Wiki 健康检查周期 |
+| `knowledge_bases` | name、visibility、embedding_model_id、source_time_chat_model_id、wiki_chat_model_id、Wiki 健康检查周期 |
 | `knowledge_base_members` | `(knowledge_base_id,user_id)` 唯一 |
 | `documents` | kb_id、object_key、sha256、status、source_time、三个时间字段 |
 | `document_tags` | tag 表及文档-标签关联表 |

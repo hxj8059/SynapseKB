@@ -89,6 +89,17 @@ synapsekb-mcp
 
 长 Agent 任务使用 `agent_run_start`、`agent_run_get`、`agent_run_cancel`，不要让单次 MCP 调用等待五分钟。
 
+`wiki_search` 是 Wiki 研究的默认入口。它使用知识库选定的 Embedding 模型，检索由“节点
+标题 + 摘要前 800 字符”生成的页面节点向量，同时合并精确别名和关键词结果，返回
+`rank/relevance_score/semantic_score/keyword_score/node_id`。相关性只用于候选排序，客户端模型
+仍需根据标题、类型和摘要筛选真正相关的少量节点，再调用 `wiki_read` 和
+`wiki_graph_neighbors` 读取正文、来源与一跳关系。Embedding 调用失败或节点向量尚未就绪时，
+服务端自动返回 `retrieval_mode=keyword_fallback`，不会让整个 Wiki 查询失败。
+
+`wiki_index` 只是有界分页目录工具，默认返回 100 个、最多 200 个目录项，并返回
+`total/next_offset/type_counts`。只有明确浏览目录、按类型列出节点或查看统计时才调用；不要在
+主题研究前先读第一页目录，也不要通过翻页遍历 Wiki 来发现相关内容。
+
 检索与 Wiki 图工具的时间字段使用 `field/from_time/to_time/include_unknown`。日期时间
 必须包含时区，默认 `field=source_time`；跨时期比较必须使用 `compare_periods` 的
 两组独立范围。

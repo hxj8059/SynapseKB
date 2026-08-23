@@ -101,6 +101,12 @@ Wiki 生成使用 `POST /api/v1/wiki/generate`，任务状态和取消位于
 `/wiki/jobs/{job_id}`。目录和页面 API 只返回当前发布版本；局部图搜索和邻居
 查询同时对节点与边应用结构化时间过滤。
 
+App 的节点目录使用
+`GET /api/v1/wiki/{kb_id}/index-page?limit=30&offset=0&query=&node_type=`。
+该接口只返回目录展示需要的轻量字段、筛选后总数和节点类型统计；`limit` 最大为 100。
+页面正文、来源和局部关系在选中节点后分别按需读取。旧的
+`GET /api/v1/wiki/{kb_id}/index` 保留用于兼容，但新客户端不应通过它全量加载大型 Wiki。
+
 Wiki 维护接口：
 
 - `POST /api/v1/wiki/health/check`：启动可取消的健康检查；

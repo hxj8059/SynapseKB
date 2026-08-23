@@ -21,6 +21,7 @@ export function KnowledgeBasesPage() {
   const [embeddingModelId, setEmbeddingModelId] = useState("");
   const [embeddingDimensions, setEmbeddingDimensions] = useState("");
   const [ragChatModelId, setRagChatModelId] = useState("");
+  const [sourceTimeChatModelId, setSourceTimeChatModelId] = useState("");
   const [rerankModelId, setRerankModelId] = useState("");
   const [wikiChatModelId, setWikiChatModelId] = useState("");
   const [wikiHealthChatModelId, setWikiHealthChatModelId] = useState("");
@@ -54,6 +55,7 @@ export function KnowledgeBasesPage() {
           embedding_model_id: embeddingModelId || null,
           embedding_dimensions: Number(embeddingDimensions),
           rag_chat_model_id: ragChatModelId || null,
+          source_time_chat_model_id: sourceTimeChatModelId || null,
           rerank_model_id: rerankModelId || null,
           rag_max_output_tokens: 8000,
           wiki_chat_model_id: wikiChatModelId || null,
@@ -73,6 +75,7 @@ export function KnowledgeBasesPage() {
       setEmbeddingModelId("");
       setEmbeddingDimensions("");
       setRagChatModelId("");
+      setSourceTimeChatModelId("");
       setRerankModelId("");
       setWikiChatModelId("");
       setWikiHealthChatModelId("");
@@ -155,6 +158,21 @@ export function KnowledgeBasesPage() {
               value={ragChatModelId}
               onValueChange={setRagChatModelId}
               placeholder="选择 RAG 问答模型"
+              options={models
+                .filter((model) => model.kind === "chat" && model.is_enabled)
+                .map((model) => ({
+                  value: model.id,
+                  label: model.name,
+                  description: model.model_name,
+                }))}
+            />
+            <Select
+              ariaLabel="日期抽取 Chat 模型"
+              value={sourceTimeChatModelId}
+              onValueChange={setSourceTimeChatModelId}
+              placeholder="不使用模型（规则提取）"
+              clearable
+              clearLabel="不使用模型（规则提取）"
               options={models
                 .filter((model) => model.kind === "chat" && model.is_enabled)
                 .map((model) => ({

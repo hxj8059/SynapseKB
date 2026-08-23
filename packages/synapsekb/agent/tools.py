@@ -26,6 +26,7 @@ from synapsekb.database.models import (
 )
 from synapsekb.domain.enums import TimeField
 from synapsekb.retrieval.federated import federated_search
+from synapsekb.wiki.search import hybrid_wiki_search
 
 
 @dataclass(slots=True)
@@ -79,7 +80,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "wiki_search",
-            "description": "按标题和摘要搜索授权知识库的已发布 Wiki 页面。",
+            "description": (
+                "对授权知识库的已发布 Wiki 节点做语义与关键词候选召回并返回相关性排名。"
+                "必须先判断候选是否真正相关，再调用 wiki_read；不要先遍历 Wiki 目录。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -298,30 +302,66 @@ async def execute_tool(
                 if arguments.get("time_filter")
                 else None
             )
-            pages = (
-                await context.session.scalars(
-                    select(WikiPage)
+            limit = min(max(int(arguments.get("limit", 10)), 1), 20)
+            scope_rows = (
+                await context.session.execute(
+                    select(KnowledgeBase, WikiSpace)
+                    .join(WikiSpace, WikiSpace.knowledge_base_id == KnowledgeBase.id)
                     .where(
-                        WikiPage.space_id.in_(space_ids),
-                        _wiki_time_clause(WikiPage, time_filter),
-                        or_(
-                            WikiPage.title.ilike(f"%{query}%"),
-                            WikiPage.summary.ilike(f"%{query}%"),
-                        ),
+                        KnowledgeBase.id.in_(context.knowledge_base_ids),
+                        WikiSpace.published_version.is_not(None),
                     )
-                    .limit(min(int(arguments.get("limit", 10)), 20))
                 )
             ).all()
+            ranked_pages: list[dict[str, Any]] = []
+            retrievals: list[dict[str, Any]] = []
+            for knowledge_base, space in scope_rows:
+                result = await hybrid_wiki_search(
+                    context.session,
+                    knowledge_base=knowledge_base,
+                    space=space,
+                    query=query,
+                    time_clause=_wiki_time_clause(WikiPage, time_filter),
+                    limit=limit,
+                )
+                retrievals.append(
+                    {
+                        "knowledge_base_id": str(knowledge_base.id),
+                        "mode": result.retrieval_mode,
+                        "embedding_error": result.embedding_error,
+                    }
+                )
+                ranked_pages.extend(
+                    {
+                        "id": str(item.page_id),
+                        "node_id": str(item.node_id),
+                        "knowledge_base_id": str(knowledge_base.id),
+                        "title": item.title,
+                        "summary": item.summary,
+                        "node_type": item.node_type,
+                        "source_time": (
+                            item.source_time.isoformat() if item.source_time else None
+                        ),
+                        "relevance_score": item.relevance_score,
+                        "semantic_score": item.semantic_score,
+                        "keyword_score": item.keyword_score,
+                        "matched_by": list(item.matched_by),
+                    }
+                    for item in result.items
+                )
+            ranked_pages.sort(
+                key=lambda item: (-float(item["relevance_score"]), str(item["title"]))
+            )
+            pages = ranked_pages[:limit]
             return {
                 "pages": [
-                    {
-                        "id": str(page.id),
-                        "title": page.title,
-                        "summary": page.summary,
-                        "source_time": (page.source_time.isoformat() if page.source_time else None),
-                    }
-                    for page in pages
-                ]
+                    {**page, "rank": rank}
+                    for rank, page in enumerate(pages, 1)
+                ],
+                "retrievals": retrievals,
+                "selection_required": (
+                    "相关性分数仅用于候选排序；请先确认真正相关的节点，再读取正文和局部关系"
+                ),
             }
         if name == "wiki_read":
             page = await context.session.scalar(

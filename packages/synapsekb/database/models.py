@@ -21,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -100,6 +101,9 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     embedding_dimensions: Mapped[int] = mapped_column(Integer, default=1536)
     rag_chat_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("models.id", ondelete="SET NULL"), index=True
+    )
+    source_time_chat_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("models.id", ondelete="SET NULL"), index=True
     )
     rerank_model_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -401,7 +405,41 @@ class WikiSpace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class WikiPage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "wiki_pages"
-    __table_args__ = (UniqueConstraint("space_id", "slug", name="uq_wiki_page_space_slug"),)
+    __table_args__ = (
+        UniqueConstraint("space_id", "slug", name="uq_wiki_page_space_slug"),
+        Index(
+            "ix_wiki_pages_published_order",
+            "space_id",
+            "sort_order",
+            "title",
+            "id",
+            postgresql_where=text("current_version_id IS NOT NULL AND is_archived = false"),
+        ),
+        Index(
+            "ix_wiki_pages_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_wiki_pages_published_source_time",
+            "space_id",
+            "source_time",
+            postgresql_where=text("current_version_id IS NOT NULL AND is_archived = false"),
+        ),
+        Index(
+            "ix_wiki_pages_published_created_at",
+            "space_id",
+            "created_at",
+            postgresql_where=text("current_version_id IS NOT NULL AND is_archived = false"),
+        ),
+        Index(
+            "ix_wiki_pages_published_updated_at",
+            "space_id",
+            "updated_at",
+            postgresql_where=text("current_version_id IS NOT NULL AND is_archived = false"),
+        ),
+    )
 
     space_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("wiki_spaces.id", ondelete="CASCADE"), index=True
@@ -457,7 +495,16 @@ class WikiPageSource(UUIDPrimaryKeyMixin, Base):
 
 class WikiNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "wiki_nodes"
-    __table_args__ = (Index("ix_wiki_nodes_space_source_time", "space_id", "source_time"),)
+    __table_args__ = (
+        Index("ix_wiki_nodes_space_source_time", "space_id", "source_time"),
+        Index(
+            "ix_wiki_nodes_space_page",
+            "space_id",
+            "page_id",
+            postgresql_include=["node_type"],
+            postgresql_where=text("page_id IS NOT NULL"),
+        ),
+    )
 
     space_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("wiki_spaces.id", ondelete="CASCADE"), index=True

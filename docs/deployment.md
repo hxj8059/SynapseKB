@@ -18,8 +18,9 @@
 - HTTP 模型网关只应位于受信 VPC/内网。SynapseKB 允许该配置并记录脱敏
   安全警告，不会阻断模型调用；如果链路经过公网，仍建议在网关前增加 HTTPS。
 - 对象存储已切换到 OSS/COS/S3，Endpoint 使用 HTTPS，Bucket 开启版本和生命周期。
-- 每个知识库显式绑定 Embedding、RAG Chat、Rerank、Wiki 生成和 Wiki 健康
-  模型；每个 Agent 显式绑定 Agent Chat 模型。
+- 每个知识库显式绑定 Embedding、RAG Chat、Wiki 生成和 Wiki 健康，按需绑定 Rerank；需要自动识别
+  文档来源日期时，再为该知识库选择可选的日期抽取 Chat 模型；每个 Agent 显式绑定
+  Agent Chat 模型。
 - 在生产的完整数据副本上执行数据库迁移，确认 `alembic current` 与
   `alembic heads` 一致；升级前先备份。
 - 执行一次普通 PDF、扫描 PDF、RAG、Agent、Wiki 更新、Wiki 健康检查和 MCP

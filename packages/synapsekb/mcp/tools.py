@@ -47,6 +47,8 @@ from synapsekb.mcp.auth import McpPrincipal, principal_var
 from synapsekb.models.provider import DeterministicMockProvider, create_provider
 from synapsekb.retrieval.context import build_citation_context
 from synapsekb.storage.factory import create_runtime_storage
+from synapsekb.wiki.index import query_wiki_index
+from synapsekb.wiki.search import hybrid_wiki_search
 
 settings = get_settings()
 
@@ -636,21 +638,57 @@ async def wiki_index(
     from_time: str | None = None,
     to_time: str | None = None,
     include_unknown: bool = False,
-) -> list[dict[str, Any]]:
-    """读取已发布 Wiki 目录。"""
+    query: str | None = None,
+    node_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """分页读取已发布 Wiki 目录。使用 query 或 node_type 缩小范围。"""
+    if not 1 <= limit <= 200:
+        raise ValueError("limit 必须在 1 到 200 之间")
+    if not 0 <= offset <= 1_000_000:
+        raise ValueError("offset 必须在 0 到 1000000 之间")
+    if query is not None and len(query) > 200:
+        raise ValueError("query 最长 200 个字符")
+    if node_type is not None and len(node_type) > 30:
+        raise ValueError("node_type 最长 30 个字符")
     async with tool_session("wiki:read", "wiki_index") as (session, user, _):
         space = await _wiki_space(session, user, knowledge_base_id)
         time_clause = _wiki_page_time_clause(field, from_time, to_time, include_unknown)
-        pages = (
-            await session.scalars(
-                select(WikiPage).where(
-                    WikiPage.space_id == space.id,
-                    WikiPage.current_version_id.is_not(None),
-                    time_clause,
-                )
-            )
-        ).all()
-        return [_wiki_page(item) for item in pages]
+        result = await query_wiki_index(
+            session,
+            space,
+            time_clause=time_clause,
+            limit=limit,
+            offset=offset,
+            query=query,
+            node_type=node_type,
+        )
+        next_offset = offset + len(result.items)
+        return {
+            "items": [
+                {
+                    "id": str(item.id),
+                    "parent_id": str(item.parent_id) if item.parent_id else None,
+                    "title": item.title,
+                    "node_type": item.node_type,
+                    "source_time": (
+                        item.source_time.isoformat() if item.source_time else None
+                    ),
+                    "updated_at": item.updated_at.isoformat(),
+                }
+                for item in result.items
+            ],
+            "total": result.total,
+            "total_published": result.total_published,
+            "limit": result.limit,
+            "offset": result.offset,
+            "next_offset": next_offset if next_offset < result.total else None,
+            "published_version": result.published_version,
+            "type_counts": [
+                {"type": item.type, "count": item.count} for item in result.type_counts
+            ],
+        }
 
 
 @mcp.tool()
@@ -661,27 +699,58 @@ async def wiki_search(
     from_time: str | None = None,
     to_time: str | None = None,
     include_unknown: bool = False,
-) -> list[dict[str, Any]]:
-    """搜索已发布 Wiki。"""
+    limit: int = 10,
+    node_type: str | None = None,
+) -> dict[str, Any]:
+    """Search published Wiki nodes with semantic recall and keyword fallback."""
+    if not 1 <= limit <= 20:
+        raise ValueError("limit 必须在 1 到 20 之间")
+    if node_type is not None and len(node_type) > 30:
+        raise ValueError("node_type 最长 30 个字符")
     async with tool_session("wiki:read", "wiki_search") as (session, user, _):
         space = await _wiki_space(session, user, knowledge_base_id)
+        knowledge_base = await session.get(KnowledgeBase, space.knowledge_base_id)
+        if knowledge_base is None:
+            raise ValueError("知识库不存在")
         time_clause = _wiki_page_time_clause(field, from_time, to_time, include_unknown)
-        pages = (
-            await session.scalars(
-                select(WikiPage)
-                .where(
-                    WikiPage.space_id == space.id,
-                    WikiPage.current_version_id.is_not(None),
-                    time_clause,
-                    or_(
-                        WikiPage.title.ilike(f"%{query}%"),
-                        WikiPage.summary.ilike(f"%{query}%"),
+        result = await hybrid_wiki_search(
+            session,
+            knowledge_base=knowledge_base,
+            space=space,
+            query=query,
+            time_clause=time_clause,
+            limit=limit,
+            node_type=node_type,
+        )
+        return {
+            "knowledge_base_id": str(knowledge_base.id),
+            "items": [
+                {
+                    "rank": rank,
+                    "id": str(item.page_id),
+                    "page_id": str(item.page_id),
+                    "node_id": str(item.node_id),
+                    "title": item.title,
+                    "summary": item.summary,
+                    "node_type": item.node_type,
+                    "source_time": (
+                        item.source_time.isoformat() if item.source_time else None
                     ),
-                )
-                .limit(50)
+                    "relevance_score": item.relevance_score,
+                    "semantic_score": item.semantic_score,
+                    "keyword_score": item.keyword_score,
+                    "matched_by": list(item.matched_by),
+                }
+                for rank, item in enumerate(result.items, 1)
+            ],
+            "retrieval_mode": result.retrieval_mode,
+            "embedding_error": result.embedding_error,
+            "semantic_candidate_count": result.semantic_candidate_count,
+            "keyword_candidate_count": result.keyword_candidate_count,
+            "selection_required": (
+                "相关性分数仅用于候选排序；请由调用模型确认真正相关的节点后再读取正文"
             )
-        ).all()
-        return [_wiki_page(item) for item in pages]
+        }
 
 
 @mcp.tool()

@@ -101,6 +101,7 @@ class KnowledgeBaseCreate(BaseModel):
     embedding_model_id: uuid.UUID
     embedding_dimensions: int = Field(ge=1, le=2000)
     rag_chat_model_id: uuid.UUID | None = None
+    source_time_chat_model_id: uuid.UUID | None = None
     rerank_model_id: uuid.UUID | None = None
     rag_max_output_tokens: int = Field(default=8000, ge=1000, le=32_000)
     wiki_chat_model_id: uuid.UUID | None = None
@@ -136,6 +137,7 @@ class KnowledgeBaseRead(ORMModel):
     embedding_model_id: uuid.UUID | None
     embedding_dimensions: int
     rag_chat_model_id: uuid.UUID | None
+    source_time_chat_model_id: uuid.UUID | None
     rerank_model_id: uuid.UUID | None
     rag_max_output_tokens: int
     wiki_chat_model_id: uuid.UUID | None
@@ -157,6 +159,7 @@ class KnowledgeBaseUpdate(BaseModel):
     embedding_model_id: uuid.UUID | None = None
     embedding_dimensions: int | None = Field(default=None, ge=1, le=2000)
     rag_chat_model_id: uuid.UUID | None = None
+    source_time_chat_model_id: uuid.UUID | None = None
     rerank_model_id: uuid.UUID | None = None
     rag_max_output_tokens: int | None = Field(default=None, ge=1000, le=32_000)
     wiki_chat_model_id: uuid.UUID | None = None
@@ -610,6 +613,31 @@ class WikiPageRead(ORMModel):
     node_type: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class WikiIndexItemRead(ORMModel):
+    id: uuid.UUID
+    parent_id: uuid.UUID | None
+    title: str
+    node_type: str
+    source_time: datetime | None
+    updated_at: datetime
+
+
+class WikiIndexTypeCountRead(ORMModel):
+    type: str
+    count: int
+
+
+class WikiIndexPageRead(ORMModel):
+    items: list[WikiIndexItemRead]
+    space_id: uuid.UUID
+    total: int
+    total_published: int
+    limit: int
+    offset: int
+    published_version: int
+    type_counts: list[WikiIndexTypeCountRead]
 
 
 class WikiPageSourceRead(ORMModel):

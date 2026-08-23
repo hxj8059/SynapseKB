@@ -23,6 +23,7 @@ export type KnowledgeBase = {
   embedding_model_id: string | null;
   embedding_dimensions: number;
   rag_chat_model_id: string | null;
+  source_time_chat_model_id: string | null;
   rerank_model_id: string | null;
   rag_max_output_tokens: number;
   wiki_chat_model_id: string | null;
@@ -296,6 +297,22 @@ export type WikiPageSummary = {
   node_type: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type WikiIndexItem = Pick<
+  WikiPageSummary,
+  "id" | "parent_id" | "title" | "node_type" | "source_time" | "updated_at"
+>;
+
+export type WikiIndexPage = {
+  items: WikiIndexItem[];
+  space_id: string;
+  total: number;
+  total_published: number;
+  limit: number;
+  offset: number;
+  published_version: number;
+  type_counts: Array<{ type: string; count: number }>;
 };
 
 export type WikiPageContent = WikiPageSummary & {

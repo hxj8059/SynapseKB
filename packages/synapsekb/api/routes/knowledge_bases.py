@@ -210,6 +210,11 @@ async def create_knowledge_base(
     )
     await _probe_embedding_dimensions(embedding_model, payload.embedding_dimensions)
     await _validate_chat_model(session, payload.rag_chat_model_id, label="RAG Chat")
+    await _validate_chat_model(
+        session,
+        payload.source_time_chat_model_id,
+        label="日期抽取 Chat",
+    )
     await _validate_rerank_model(session, payload.rerank_model_id)
     await _validate_chat_model(session, payload.wiki_chat_model_id, label="Wiki 生成 Chat")
     await _validate_chat_model(
@@ -225,6 +230,7 @@ async def create_knowledge_base(
         embedding_model_id=payload.embedding_model_id,
         embedding_dimensions=payload.embedding_dimensions,
         rag_chat_model_id=payload.rag_chat_model_id,
+        source_time_chat_model_id=payload.source_time_chat_model_id,
         rerank_model_id=payload.rerank_model_id,
         rag_max_output_tokens=payload.rag_max_output_tokens,
         wiki_chat_model_id=payload.wiki_chat_model_id,
@@ -336,6 +342,13 @@ async def update_knowledge_base(
     if "rag_chat_model_id" in supplied:
         await _validate_chat_model(session, payload.rag_chat_model_id, label="RAG Chat")
         knowledge_base.rag_chat_model_id = payload.rag_chat_model_id
+    if "source_time_chat_model_id" in supplied:
+        await _validate_chat_model(
+            session,
+            payload.source_time_chat_model_id,
+            label="日期抽取 Chat",
+        )
+        knowledge_base.source_time_chat_model_id = payload.source_time_chat_model_id
     if "rerank_model_id" in supplied:
         await _validate_rerank_model(session, payload.rerank_model_id)
         knowledge_base.rerank_model_id = payload.rerank_model_id

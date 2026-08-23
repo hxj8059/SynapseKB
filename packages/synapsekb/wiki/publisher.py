@@ -3,11 +3,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+import structlog
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapsekb.database.models import (
     Document,
+    KnowledgeBase,
     WikiEdge,
     WikiNode,
     WikiPage,
@@ -16,6 +18,9 @@ from synapsekb.database.models import (
     WikiSpace,
     WikiUpdateJob,
 )
+from synapsekb.wiki.entity_resolution import ensure_page_node_embeddings
+
+logger = structlog.get_logger()
 
 
 class WikiQualityError(RuntimeError):
@@ -172,3 +177,61 @@ async def publish_generation(
     space.published_version = job.candidate_version
     job.status = "published"
     await session.commit()
+
+    # The published page switch and graph replacement above must not depend on
+    # an external Embedding API. Refresh search vectors only after that atomic
+    # commit. Queries automatically fall back to keywords while vectors are
+    # unavailable, and an Embedding outage never rolls back a valid Wiki.
+    try:
+        knowledge_base = await session.get(KnowledgeBase, space.knowledge_base_id)
+        pages = list(
+            (
+                await session.scalars(
+                    select(WikiPage).where(WikiPage.id.in_(candidate_page_ids))
+                )
+            ).all()
+        )
+        nodes = list(
+            (
+                await session.scalars(
+                    select(WikiNode).where(
+                        WikiNode.space_id == space.id,
+                        WikiNode.page_id.in_(candidate_page_ids),
+                    )
+                )
+            ).all()
+        )
+        embedded_count = 0
+        embedding_error: str | None = "知识库不存在"
+        if knowledge_base is not None:
+            embedded_count, embedding_error = await ensure_page_node_embeddings(
+                session,
+                knowledge_base,
+                pages,
+                {node.page_id: node for node in nodes if node.page_id is not None},
+            )
+        refreshed_job = await session.get(WikiUpdateJob, job_id)
+        if refreshed_job is not None:
+            refreshed_job.quality_report = {
+                **refreshed_job.quality_report,
+                "wiki_search_embeddings": {
+                    "updated_count": embedded_count,
+                    "error": embedding_error,
+                    "input": "title + summary[:800]",
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+            }
+        await session.commit()
+        if embedding_error:
+            logger.warning(
+                "wiki_published_embedding_refresh_incomplete",
+                knowledge_base_id=str(space.knowledge_base_id),
+                error_type=embedding_error.split(":", 1)[0],
+            )
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "wiki_published_embedding_refresh_failed",
+            knowledge_base_id=str(space.knowledge_base_id),
+            error_type=type(exc).__name__,
+        )

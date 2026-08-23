@@ -68,6 +68,12 @@ async def test_mcp_retrieval_tools_expose_scope_and_time_filters() -> None:
         properties = tools[name].inputSchema["properties"]
         assert {"field", "from_time", "to_time", "include_unknown"} <= set(properties)
 
+    wiki_index_properties = tools["wiki_index"].inputSchema["properties"]
+    assert {"query", "node_type", "limit", "offset"} <= set(wiki_index_properties)
+
+    wiki_search_properties = tools["wiki_search"].inputSchema["properties"]
+    assert {"query", "node_type", "limit"} <= set(wiki_search_properties)
+
 
 async def test_mcp_tool_session_requires_authentication() -> None:
     with pytest.raises(PermissionError, match="未认证"):

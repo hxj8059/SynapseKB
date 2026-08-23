@@ -5,6 +5,7 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import aiofiles
 import structlog
@@ -25,6 +26,10 @@ from synapsekb.models.provider import create_provider
 from synapsekb.storage.base import ObjectStorage
 from synapsekb.storage.factory import create_runtime_storage
 from synapsekb.temporal.source_time import extract_source_time
+from synapsekb.temporal.source_time_model import (
+    SourceTimeJsonProvider,
+    extract_source_time_with_model,
+)
 from synapsekb.wiki.scheduler import schedule_wiki_update
 
 logger = structlog.get_logger()
@@ -144,11 +149,108 @@ async def process_document_job(job_id: uuid.UUID) -> str:
                     await handle.write(markdown)
                 await storage.put_file(parsed_key, parsed_path, "text/markdown")
                 document.parsed_text_key = parsed_key
+                knowledge_base = await session.get(KnowledgeBase, document.knowledge_base_id)
+                if knowledge_base is None:
+                    raise RuntimeError("知识库不存在")
                 if document.source_time is None:
-                    document.source_time = extract_source_time(
-                        filename=document.filename,
-                        content=markdown,
+                    await _set_status(
+                        job_id,
+                        status="running",
+                        stage="extracting_source_time",
+                        progress=0.3,
                     )
+                    await _check_cancelled(job_id)
+                    extraction_metadata: dict[str, str | None]
+                    if knowledge_base.source_time_chat_model_id is not None:
+                        source_time_model = await session.get(
+                            ProviderModel,
+                            knowledge_base.source_time_chat_model_id,
+                        )
+                        provider = None
+                        try:
+                            if (
+                                source_time_model is None
+                                or source_time_model.kind != "chat"
+                                or not source_time_model.is_enabled
+                            ):
+                                raise RuntimeError("配置的日期抽取 Chat 模型不可用")
+                            provider = create_provider(source_time_model)
+                            if not hasattr(provider, "chat_json"):
+                                raise RuntimeError("日期抽取模型不支持 Chat JSON")
+                            result = await extract_source_time_with_model(
+                                cast(SourceTimeJsonProvider, provider),
+                                filename=document.filename,
+                                title=document.title,
+                                content=markdown,
+                            )
+                            await _check_cancelled(job_id)
+                            document.source_time = result.value
+                            extraction_metadata = {
+                                "method": "model",
+                                "model_id": str(source_time_model.id),
+                                "status": "resolved" if result.value is not None else "unknown",
+                                "value": result.value.isoformat() if result.value else None,
+                            }
+                        except JobCancelled:
+                            raise
+                        except Exception as exc:
+                            await _check_cancelled(job_id)
+                            document.source_time = extract_source_time(
+                                filename=document.filename,
+                                title=document.title,
+                                content=markdown,
+                            )
+                            extraction_metadata = {
+                                "method": "rules_fallback",
+                                "model_id": str(knowledge_base.source_time_chat_model_id),
+                                "status": (
+                                    "resolved" if document.source_time is not None else "unknown"
+                                ),
+                                "value": (
+                                    document.source_time.isoformat()
+                                    if document.source_time is not None
+                                    else None
+                                ),
+                                "error_type": type(exc).__name__,
+                            }
+                            logger.warning(
+                                "source_time_model_failed",
+                                document_id=str(document.id),
+                                model_id=str(knowledge_base.source_time_chat_model_id),
+                                error_type=type(exc).__name__,
+                            )
+                        finally:
+                            if provider is not None:
+                                try:
+                                    await provider.close()
+                                except Exception:
+                                    logger.warning(
+                                        "source_time_model_close_failed",
+                                        document_id=str(document.id),
+                                        model_id=str(knowledge_base.source_time_chat_model_id),
+                                    )
+                    else:
+                        document.source_time = extract_source_time(
+                            filename=document.filename,
+                            title=document.title,
+                            content=markdown,
+                        )
+                        extraction_metadata = {
+                            "method": "rules",
+                            "model_id": None,
+                            "status": (
+                                "resolved" if document.source_time is not None else "unknown"
+                            ),
+                            "value": (
+                                document.source_time.isoformat()
+                                if document.source_time is not None
+                                else None
+                            ),
+                        }
+                    document.parse_config = {
+                        **(document.parse_config or {}),
+                        "source_time_extraction": extraction_metadata,
+                    }
                 await session.commit()
 
                 await _set_status(
@@ -161,7 +263,6 @@ async def process_document_job(job_id: uuid.UUID) -> str:
                 if not chunks:
                     raise ValueError("文档没有可索引文本")
 
-                knowledge_base = await session.get(KnowledgeBase, document.knowledge_base_id)
                 if knowledge_base is None or knowledge_base.embedding_model_id is None:
                     raise RuntimeError("知识库尚未配置 Embedding 模型")
                 model = await session.get(ProviderModel, knowledge_base.embedding_model_id)

@@ -227,6 +227,7 @@ async def _configured_references(
                 or_(
                     KnowledgeBase.embedding_model_id == model_id,
                     KnowledgeBase.rag_chat_model_id == model_id,
+                    KnowledgeBase.source_time_chat_model_id == model_id,
                     KnowledgeBase.rerank_model_id == model_id,
                     KnowledgeBase.wiki_chat_model_id == model_id,
                     KnowledgeBase.wiki_health_chat_model_id == model_id,

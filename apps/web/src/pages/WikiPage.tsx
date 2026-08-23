@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   Activity,
   BookOpen,
@@ -10,7 +15,7 @@ import {
   Search,
   Square,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { PageHeader } from "../components/PageHeader";
@@ -20,17 +25,13 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Select } from "../components/ui/select";
 import { api } from "../lib/api";
-import {
-  countWikiPageTypes,
-  filterWikiPages,
-  WIKI_INDEX_PAGE_SIZE,
-} from "../lib/wikiIndex";
+import { WIKI_INDEX_PAGE_SIZE, wikiIndexPagePath } from "../lib/wikiIndex";
 import type {
   KnowledgeBase,
   WikiHealthJob,
+  WikiIndexPage,
   WikiJob,
   WikiPageContent,
-  WikiPageSummary,
   WikiPageVersion,
   WikiGraph,
   WikiEntityResolution,
@@ -69,6 +70,7 @@ export function WikiPage() {
   const [relationNotice, setRelationNotice] = useState("");
   const [indexPage, setIndexPage] = useState(1);
   const [indexQuery, setIndexQuery] = useState("");
+  const [debouncedIndexQuery, setDebouncedIndexQuery] = useState("");
   const [indexNodeType, setIndexNodeType] = useState("");
   const contentRef = useRef<HTMLDivElement>(null);
   const [selectedCandidate, setSelectedCandidate] =
@@ -89,46 +91,63 @@ export function WikiPage() {
       setKnowledgeBaseId(knowledgeBases[0].id);
     }
   }, [knowledgeBaseId, knowledgeBases, requestedKnowledgeBaseId]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedIndexQuery(indexQuery), 250);
+    return () => window.clearTimeout(timeout);
+  }, [indexQuery]);
   const {
-    data: pages = [],
+    data: indexData,
     error: indexError,
+    isFetching: isIndexFetching,
     isLoading,
   } = useQuery({
-    queryKey: ["wiki-index", knowledgeBaseId],
-    queryFn: () => api<WikiPageSummary[]>(`/wiki/${knowledgeBaseId}/index`),
+    queryKey: [
+      "wiki-index",
+      knowledgeBaseId,
+      indexPage,
+      debouncedIndexQuery,
+      indexNodeType,
+    ],
+    queryFn: () =>
+      api<WikiIndexPage>(
+        wikiIndexPagePath(
+          knowledgeBaseId,
+          indexPage,
+          debouncedIndexQuery,
+          indexNodeType,
+        ),
+      ),
     enabled: Boolean(knowledgeBaseId),
     retry: false,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === knowledgeBaseId
+        ? keepPreviousData(previousData)
+        : undefined,
   });
-  const typeCounts = useMemo(() => countWikiPageTypes(pages), [pages]);
-  const filteredPages = useMemo(
-    () => filterWikiPages(pages, indexQuery, indexNodeType),
-    [indexNodeType, indexQuery, pages],
-  );
+  const pages = indexData?.items ?? [];
+  const totalPublished = indexData?.total_published ?? 0;
+  const filteredTotal = indexData?.total ?? 0;
+  const typeCounts = indexData?.type_counts ?? [];
   const indexPageCount = Math.max(
     1,
-    Math.ceil(filteredPages.length / WIKI_INDEX_PAGE_SIZE),
+    Math.ceil(filteredTotal / WIKI_INDEX_PAGE_SIZE),
   );
   const currentIndexPage = Math.min(indexPage, indexPageCount);
-  const visiblePages = filteredPages.slice(
-    (currentIndexPage - 1) * WIKI_INDEX_PAGE_SIZE,
-    currentIndexPage * WIKI_INDEX_PAGE_SIZE,
-  );
   useEffect(() => {
     setIndexPage(1);
-  }, [indexNodeType, indexQuery, knowledgeBaseId]);
+  }, [debouncedIndexQuery, indexNodeType, knowledgeBaseId]);
   useEffect(() => {
-    if (requestedPageId && pages.some((page) => page.id === requestedPageId)) {
+    if (indexPage > indexPageCount) setIndexPage(indexPageCount);
+  }, [indexPage, indexPageCount]);
+  useEffect(() => {
+    if (requestedPageId && indexData) {
       setPageId(requestedPageId);
-      const requestedIndex = filteredPages.findIndex((item) => item.id === requestedPageId);
-      if (requestedIndex >= 0) {
-        setIndexPage(Math.floor(requestedIndex / WIKI_INDEX_PAGE_SIZE) + 1);
-      }
       return;
     }
-    if (pages[0] && !pages.some((page) => page.id === pageId)) {
+    if (!pageId && pages[0]) {
       setPageId(pages[0].id);
     }
-  }, [filteredPages, pageId, pages, requestedPageId]);
+  }, [indexData, pageId, pages, requestedPageId]);
   const { data: page } = useQuery({
     queryKey: ["wiki-page", pageId],
     queryFn: () => api<WikiPageContent>(`/wiki/pages/${pageId}`),
@@ -727,7 +746,7 @@ export function WikiPage() {
       )}
       {isLoading ? (
         <p className="text-sm text-[var(--muted)]">正在读取 Wiki…</p>
-      ) : indexError || pages.length === 0 ? (
+      ) : indexError || totalPublished === 0 ? (
         <Card className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
           <BookOpen className="mb-4 text-violet-500" />
           <h2 className="font-semibold">尚无已发布 Wiki</h2>
@@ -742,10 +761,13 @@ export function WikiPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold">节点目录</h2>
-                  <p className="mt-1 text-xs text-[var(--muted)]">共 {pages.length} 个已发布节点</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    共 {totalPublished} 个已发布节点
+                    {isIndexFetching ? " · 更新中" : ""}
+                  </p>
                 </div>
                 <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-xs font-semibold text-violet-600 dark:text-violet-300">
-                  {filteredPages.length}
+                  {filteredTotal}
                 </span>
               </div>
               <div className="relative mt-3">
@@ -771,7 +793,7 @@ export function WikiPage() {
                   }`}
                   onClick={() => setIndexNodeType("")}
                 >
-                  全部 {pages.length}
+                  全部 {totalPublished}
                 </button>
                 {typeCounts.map(({ type, count }) => (
                   <button
@@ -790,8 +812,8 @@ export function WikiPage() {
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {visiblePages.length ? (
-                visiblePages.map((item) => (
+              {pages.length ? (
+                pages.map((item) => (
                   <button
                     key={item.id}
                     type="button"

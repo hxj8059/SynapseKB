@@ -856,6 +856,11 @@ async def _rebuild_generation_graph(
             page_node.source_page_id = page.id
             page_node.source_time = version.source_time
             page_node.metadata_json = {**page_node.metadata_json, "slug": page.slug}
+        # Search vectors are derived from the page title and summary. Publishing
+        # a new version can change either, so never leave a stale vector attached
+        # to the rebuilt node. The publisher refreshes it after the atomic switch.
+        page_node.embedding = None
+        page_node.embedding_model_id = None
         node_by_slug[page.slug] = page_node
 
     await session.flush()

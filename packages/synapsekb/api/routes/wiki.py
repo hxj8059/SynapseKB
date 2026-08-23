@@ -19,6 +19,7 @@ from synapsekb.api.schemas import (
     WikiGraphSearchRequest,
     WikiHealthJobRead,
     WikiHealthStartRequest,
+    WikiIndexPageRead,
     WikiJobRead,
     WikiMergePagesRequest,
     WikiPageContent,
@@ -50,6 +51,7 @@ from synapsekb.wiki.health import (
     sanitize_wiki_health_report,
     undo_wiki_page_merge,
 )
+from synapsekb.wiki.index import query_wiki_index, wiki_page_node_types
 from synapsekb.wiki.model_selection import (
     WikiModelConfigurationError,
     resolve_wiki_health_model,
@@ -169,18 +171,12 @@ async def wiki_index(
         to_time,
         include_unknown,
     )
-    node_type = (
-        select(WikiNode.node_type)
-        .where(
-            WikiNode.space_id == space.id,
-            WikiNode.page_id == WikiPage.id,
-        )
-        .limit(1)
-        .scalar_subquery()
-    )
+    page_nodes = wiki_page_node_types(space.id)
+    node_type = func.coalesce(page_nodes.c.node_type, "页面")
     rows = (
         await session.execute(
             select(WikiPage, node_type.label("node_type"))
+            .outerjoin(page_nodes, page_nodes.c.page_id == WikiPage.id)
             .where(
                 WikiPage.space_id == space.id,
                 WikiPage.current_version_id.is_not(None),
@@ -196,6 +192,42 @@ async def wiki_index(
         )
         for page, page_node_type in rows
     ]
+
+
+@router.get("/{knowledge_base_id}/index-page", response_model=WikiIndexPageRead)
+async def wiki_index_page(
+    knowledge_base_id: uuid.UUID,
+    user: CurrentUser,
+    session: DatabaseSession,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    query: str | None = Query(default=None, max_length=200),
+    node_type: str | None = Query(default=None, max_length=30),
+    time_field: TimeField = TimeField.SOURCE_TIME,
+    from_time: AwareDatetime | None = None,
+    to_time: AwareDatetime | None = None,
+    include_unknown: bool = False,
+) -> WikiIndexPageRead:
+    """Return a bounded, lightweight page of the published Wiki directory."""
+
+    space = await _space(session, user, knowledge_base_id)
+    if from_time is not None and to_time is not None and to_time < from_time:
+        raise HTTPException(status_code=422, detail="to_time 必须晚于 from_time")
+    result = await query_wiki_index(
+        session,
+        space,
+        time_clause=_wiki_page_time_clause(
+            time_field,
+            from_time,
+            to_time,
+            include_unknown,
+        ),
+        limit=limit,
+        offset=offset,
+        query=query,
+        node_type=node_type,
+    )
+    return WikiIndexPageRead.model_validate(result)
 
 
 @router.get("/pages/{page_id}", response_model=WikiPageContent)
