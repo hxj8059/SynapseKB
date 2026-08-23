@@ -225,6 +225,7 @@ export type Agent = {
   visibility: "all" | "users";
   max_steps: number;
   max_tokens: number;
+  tool_decision_max_tokens: number;
   timeout_seconds: number;
   recommended_questions: string[];
   is_enabled: boolean;

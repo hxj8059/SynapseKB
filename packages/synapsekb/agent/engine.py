@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, TypedDict
 
+from langgraph.errors import NodeCancelledError
 from langgraph.graph import END, StateGraph
 from redis.asyncio import Redis
 from sqlalchemy import select, text
@@ -322,7 +323,7 @@ async def _run_agent(run_id: uuid.UUID) -> None:
             output_tokens = (
                 min(max(agent.max_tokens, 4_000), 32_000)
                 if not use_tools
-                else min(max(agent.max_tokens // max(agent.max_steps, 1), 768), 4_000)
+                else min(max(agent.tool_decision_max_tokens, 1_000), 8_000)
             )
             message = await provider.chat_with_tools(
                 bounded_messages,
@@ -558,33 +559,21 @@ async def _run_agent(run_id: uuid.UUID) -> None:
                 "run.completed",
                 {"run_id": str(run.id), "steps": final_state["step"]},
             )
-        except asyncio.CancelledError:
-            run.status = "cancelled"
-            run.finished_at = datetime.now(UTC)
-            await session.commit()
-            await _publish(redis, run.id, "run.cancelled", {"run_id": str(run.id)})
-        except Exception as exc:
-            # Never flush a half-written step from an unexpected failure. A
-            # retry resumes from the last atomically persisted graph state.
+        except (asyncio.CancelledError, NodeCancelledError) as exc:
             await session.rollback()
-            failed_run = await session.get(AgentRun, run_id)
-            if failed_run is not None:
-                failed_run.status = "failed"
-                failed_run.error_summary = f"{type(exc).__name__}: {exc}"[:1000]
-                failed_run.finished_at = datetime.now(UTC)
+            cancelled_run = await session.get(AgentRun, run_id)
+            if cancelled_run is None or cancelled_run.cancel_requested_at is None:
+                raise RuntimeError("Agent 模型节点被意外中断") from exc
+            cancelled_run.status = "cancelled"
+            cancelled_run.error_summary = None
+            cancelled_run.finished_at = datetime.now(UTC)
             await session.commit()
-            await _publish(
-                redis,
-                run_id,
-                "run.error",
-                {
-                    "message": (
-                        failed_run.error_summary
-                        if failed_run is not None
-                        else f"{type(exc).__name__}: {exc}"[:1000]
-                    )
-                },
-            )
+            await _publish(redis, run_id, "run.cancelled", {"run_id": str(run_id)})
+        except Exception:
+            # Leave the last committed graph state intact. The actor decides
+            # whether this attempt is retryable and only publishes a terminal
+            # failure after the retry budget has been exhausted.
+            await session.rollback()
             raise
         finally:
             await provider.close()

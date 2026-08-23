@@ -18,6 +18,7 @@ const agent: Agent = {
   visibility: "all",
   max_steps: 8,
   max_tokens: 12000,
+  tool_decision_max_tokens: 4000,
   timeout_seconds: 300,
   recommended_questions: [],
   is_enabled: true,

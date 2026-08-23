@@ -507,6 +507,7 @@ class AgentCreate(BaseModel):
     user_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
     max_steps: int = Field(default=8, ge=1, le=20)
     max_tokens: int = Field(default=12_000, ge=1000, le=100_000)
+    tool_decision_max_tokens: int = Field(default=4_000, ge=1_000, le=8_000)
     timeout_seconds: int = Field(default=300, ge=30, le=900)
     recommended_questions: list[str] = Field(default_factory=list, max_length=20)
 
@@ -528,6 +529,7 @@ class AgentRead(ORMModel):
     visibility: str
     max_steps: int
     max_tokens: int
+    tool_decision_max_tokens: int
     timeout_seconds: int
     recommended_questions: list[str]
     is_enabled: bool
@@ -539,6 +541,7 @@ class AgentRuntimeUpdate(BaseModel):
     chat_model_id: uuid.UUID
     max_steps: int = Field(ge=1, le=20)
     max_tokens: int = Field(ge=4000, le=32_000)
+    tool_decision_max_tokens: int = Field(default=4_000, ge=1_000, le=8_000)
     timeout_seconds: int = Field(ge=30, le=900)
 
 

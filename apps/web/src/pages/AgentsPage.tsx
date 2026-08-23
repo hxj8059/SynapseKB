@@ -45,6 +45,7 @@ export function AgentsPage() {
     chat_model_id: "",
     max_steps: 8,
     max_tokens: 12000,
+    tool_decision_max_tokens: 4000,
     timeout_seconds: 300,
   });
   const [form, setForm] = useState({
@@ -57,6 +58,7 @@ export function AgentsPage() {
     user_ids: [] as string[],
     max_steps: 8,
     max_tokens: 12000,
+    tool_decision_max_tokens: 4000,
     timeout_seconds: 300,
   });
   const { data: agents = [] } = useQuery({
@@ -115,6 +117,7 @@ export function AgentsPage() {
       chat_model_id: selectedAgent.chat_model_id,
       max_steps: selectedAgent.max_steps,
       max_tokens: selectedAgent.max_tokens,
+      tool_decision_max_tokens: selectedAgent.tool_decision_max_tokens,
       timeout_seconds: selectedAgent.timeout_seconds,
     });
   }, [selectedAgent]);
@@ -156,6 +159,7 @@ export function AgentsPage() {
           ...form,
           max_steps: form.max_steps,
           max_tokens: form.max_tokens,
+          tool_decision_max_tokens: form.tool_decision_max_tokens,
           timeout_seconds: form.timeout_seconds,
           recommended_questions: [],
         }),
@@ -241,6 +245,24 @@ export function AgentsPage() {
                 value={form.max_tokens}
                 onChange={(event) =>
                   setForm({ ...form, max_tokens: Number(event.target.value) })
+                }
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1.5 block text-xs font-medium text-[var(--muted)]">
+                单步工具决策上限（Token）
+              </span>
+              <Input
+                type="number"
+                min={1000}
+                max={8000}
+                step={500}
+                value={form.tool_decision_max_tokens}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    tool_decision_max_tokens: Number(event.target.value),
+                  })
                 }
               />
             </label>
@@ -452,7 +474,7 @@ export function AgentsPage() {
                 <div>
                   <h2 className="text-sm font-semibold">Agent 专用模型</h2>
                   <p className="mt-1 text-xs text-[var(--muted)]">
-                    当前：{models.find((model) => model.id === selectedAgent.chat_model_id)?.name ?? "未找到模型"} · 最终回答 {selectedAgent.max_tokens} Token
+                    当前：{models.find((model) => model.id === selectedAgent.chat_model_id)?.name ?? "未找到模型"} · 最终回答 {selectedAgent.max_tokens} Token · 工具决策 {selectedAgent.tool_decision_max_tokens} Token
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => setEditingRuntime((value) => !value)}>
@@ -460,7 +482,7 @@ export function AgentsPage() {
                 </Button>
               </div>
               {editingRuntime && (
-                <div className="mt-4 grid gap-3 md:grid-cols-4 md:items-end">
+                <div className="mt-4 grid gap-3 md:grid-cols-5 md:items-end">
                   <label className="text-sm">
                     <span className="mb-1.5 block text-xs text-[var(--muted)]">Chat 模型</span>
                     <Select
@@ -475,6 +497,10 @@ export function AgentsPage() {
                   <label className="text-sm">
                     <span className="mb-1.5 block text-xs text-[var(--muted)]">回答上限</span>
                     <Input type="number" min={4000} max={32000} step={1000} value={runtime.max_tokens} onChange={(event) => setRuntime({ ...runtime, max_tokens: Number(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1.5 block text-xs text-[var(--muted)]">工具决策上限</span>
+                    <Input type="number" min={1000} max={8000} step={500} value={runtime.tool_decision_max_tokens} onChange={(event) => setRuntime({ ...runtime, tool_decision_max_tokens: Number(event.target.value) })} />
                   </label>
                   <label className="text-sm">
                     <span className="mb-1.5 block text-xs text-[var(--muted)]">工具步骤</span>

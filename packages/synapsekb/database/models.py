@@ -316,6 +316,7 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     visibility: Mapped[str] = mapped_column(String(20), default="users", index=True)
     max_steps: Mapped[int] = mapped_column(Integer, default=8)
     max_tokens: Mapped[int] = mapped_column(Integer, default=12000)
+    tool_decision_max_tokens: Mapped[int] = mapped_column(Integer, default=4000)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
     recommended_questions: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)

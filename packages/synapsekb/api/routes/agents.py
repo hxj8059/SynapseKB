@@ -129,6 +129,7 @@ async def create_agent(
         visibility=payload.visibility,
         max_steps=payload.max_steps,
         max_tokens=payload.max_tokens,
+        tool_decision_max_tokens=payload.tool_decision_max_tokens,
         timeout_seconds=payload.timeout_seconds,
         recommended_questions=payload.recommended_questions,
         created_by_id=user.id,
@@ -181,6 +182,7 @@ async def update_agent_runtime(
     agent.chat_model_id = payload.chat_model_id
     agent.max_steps = payload.max_steps
     agent.max_tokens = payload.max_tokens
+    agent.tool_decision_max_tokens = payload.tool_decision_max_tokens
     agent.timeout_seconds = payload.timeout_seconds
     session.add(
         AuditLog(
@@ -192,6 +194,7 @@ async def update_agent_runtime(
                 "chat_model_id": str(payload.chat_model_id),
                 "max_steps": payload.max_steps,
                 "max_tokens": payload.max_tokens,
+                "tool_decision_max_tokens": payload.tool_decision_max_tokens,
                 "timeout_seconds": payload.timeout_seconds,
             },
             created_at=datetime.now(UTC),
@@ -318,6 +321,7 @@ async def cancel_agent_run(
         raise HTTPException(status_code=409, detail="运行已结束，无法取消")
     run.cancel_requested_at = datetime.now(UTC)
     await session.commit()
+    await session.refresh(run)
     return run
 
 
