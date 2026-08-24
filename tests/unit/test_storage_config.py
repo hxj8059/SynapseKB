@@ -1,9 +1,12 @@
+import base64
+import hashlib
+
 import pytest
 from pydantic import ValidationError
 from synapsekb.api.schemas import StorageSettingsUpdate
 from synapsekb.config import Settings
 from synapsekb.storage.config import StorageConfig, validate_storage_config
-from synapsekb.storage.s3 import S3ObjectStorage
+from synapsekb.storage.s3 import S3ObjectStorage, _add_delete_objects_content_md5
 
 
 def _oss_config() -> StorageConfig:
@@ -36,6 +39,24 @@ def test_oss_client_disables_unsupported_streaming_checksum() -> None:
     assert botocore_config.response_checksum_validation == "when_required"
     assert botocore_config.s3["addressing_style"] == "virtual"
     assert botocore_config.s3["payload_signing_enabled"] is False
+
+
+def test_delete_objects_adds_cos_compatible_content_md5() -> None:
+    body = (
+        b'<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+        b"<Object><Key>SynapseKB/example.pdf</Key></Object><Quiet>true</Quiet></Delete>"
+    )
+    params: dict[str, object] = {"body": body, "headers": {}}
+
+    _add_delete_objects_content_md5(params=params, model=object())
+
+    headers = params["headers"]
+    assert isinstance(headers, dict)
+    expected = base64.b64encode(
+        hashlib.md5(body, usedforsecurity=False).digest()
+    ).decode("ascii")
+    assert headers["Content-MD5"] == expected
+    assert len(expected) == 24
 
 
 def test_storage_settings_reject_unsafe_prefix() -> None:

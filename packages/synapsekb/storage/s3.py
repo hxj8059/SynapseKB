@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, cast
@@ -9,6 +11,27 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from synapsekb.storage.config import StorageConfig
+
+
+def _add_delete_objects_content_md5(
+    params: dict[str, Any],
+    **_kwargs: object,
+) -> None:
+    """Add the RFC 1864 checksum required by COS Delete Multiple Objects.
+
+    Recent Botocore versions may choose an ``x-amz-checksum-*`` header for the
+    S3 operation. Tencent COS still requires ``Content-MD5`` for this XML
+    request body, so calculate it after serialization and before SigV4 signing.
+    """
+
+    body = params.get("body")
+    if isinstance(body, str):
+        body = body.encode()
+    if not isinstance(body, bytes):
+        raise RuntimeError("对象存储批量删除请求体无法计算 Content-MD5")
+    digest = hashlib.md5(body, usedforsecurity=False).digest()
+    headers = params.setdefault("headers", {})
+    headers["Content-MD5"] = base64.b64encode(digest).decode("ascii")
 
 
 class S3ObjectStorage:
@@ -65,6 +88,10 @@ class S3ObjectStorage:
         if len(keys) > 1000:
             raise ValueError("S3 批量删除每次最多支持 1000 个对象")
         async with self.session.client("s3", **self.options) as client:
+            client.meta.events.register(
+                "before-call.s3.DeleteObjects",
+                _add_delete_objects_content_md5,
+            )
             response = await client.delete_objects(
                 Bucket=self.bucket,
                 Delete={
