@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import socket
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from bs4 import BeautifulSoup
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +18,28 @@ class FetchedDocument:
     media_type: str
     suffix: str
     final_url: str
+    title: str | None = None
+    source_time: datetime | None = None
+
+
+def webpage_metadata(content: bytes, url: str) -> tuple[str | None, datetime | None]:
+    soup = BeautifulSoup(content, "html.parser")
+    if urlsplit(url).hostname == "mp.weixin.qq.com":
+        article = soup.select_one("#js_content")
+        if article is None or not article.get_text(strip=True):
+            raise ValueError(
+                "微信公众号未返回可读取正文（可能需要微信验证、文章已删除或限制访问）。"
+                "请在浏览器完成验证后保存正文为 HTML/Markdown 文件上传。"
+            )
+        title_node = soup.select_one("#activity-name") or soup.title
+        # Only the publisher's explicit epoch field; do not mistake dates in article text.
+        match = re.search(
+            r"\b(?:var\s+)?(?:ct|create_time)\s*[=:]\s*[\"\']?(\d{10})[\"\']?",
+            content.decode("utf-8", errors="replace"),
+        )
+        published = datetime.fromtimestamp(int(match[1]), UTC) if match else None
+        return title_node.get_text(" ", strip=True) if title_node else None, published
+    return soup.title.get_text(" ", strip=True) if soup.title else None, None
 
 
 def _validate_url_shape(url: str, allowed_ports: set[int]) -> tuple[str, int]:
@@ -112,10 +137,17 @@ async def fetch_public_document(
                     raise ValueError("网页 URL 返回空内容")
                 if media_type == "application/pdf" and not content.startswith(b"%PDF-"):
                     raise ValueError("网页 URL 声明为 PDF，但内容签名无效")
+                title, source_time = (
+                    webpage_metadata(bytes(content), str(response.url))
+                    if media_type in {"text/html", "application/xhtml+xml"}
+                    else (None, None)
+                )
                 return FetchedDocument(
                     content=bytes(content),
                     media_type=media_type,
                     suffix=supported[media_type],
                     final_url=str(response.url),
+                    title=title,
+                    source_time=source_time,
                 )
     raise RuntimeError("网页抓取未返回结果")

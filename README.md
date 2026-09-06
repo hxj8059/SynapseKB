@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-7254E8.svg"></a>
+  <img alt="Version 0.1.1" src="https://img.shields.io/badge/version-0.1.1-7254E8.svg">
   <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232A.svg?logo=react&logoColor=61DAFB">
   <img alt="PostgreSQL 16" src="https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?logo=postgresql&logoColor=white">
@@ -28,6 +29,19 @@ Wiki、时间关系图和 MCP/Skill 集成放在一个清晰的私有部署产�
 > [!IMPORTANT]
 > 当前版本是可运行的早期开源版本。核心纵向链路已经实现，但 API、数据库结构和 UI 仍
 > 可能演进。生产使用前请完成真实数据压测、安全审查、备份恢复演练和云厂商兼容验证。
+
+## 最新更新 · v0.1.1（2026-09-07）
+
+- **三级账号与审批**：新增超级管理员；管理员申请添加普通用户，超级管理员在“账号管理 → 账号审批”批准或拒绝。待审批账号不能登录或使用 API Key；现有账号保持已审批，最早的启用管理员自动升级为超级管理员。
+- **知识库成员配置**：“账号管理 → 知识库权限”支持全员可见或指定成员。普通用户的 App、REST、Agent 和 MCP 读取统一受权限约束；管理员及超级管理员仍有全库管理权限，部门资料隔离请使用普通用户账号。
+- **文档日期筛选**：支持按名称、状态、上传时间和 `source_time` 筛选；两种时间范围可同时生效，数据库过滤后分页返回。
+- **网页与公众号导入**：文档页新增链接导入，REST 和 MCP `document_import_url` 共用导入流程；写操作需要管理员账号及相应权限。公开可读的微信文章可提取标题、正文和明确发布时间；验证码、已删除或访问受限页面会报错，不会误入库。
+- **可靠任务投递**：新增事务投递表 `task_dispatches`、Worker 领取锁、心跳及恢复机制；不再按排队时长重复投递。提供历史消息原子去重和缺失任务补投工具，复用现有 scheduler，不增加 Worker。同步修正 Agent 重试通知，并为 Chunk 引用外键补充索引。
+
+> [!IMPORTANT]
+> 从旧版升级涉及 `0016_chunk_ref_indexes`、`0017_account_approvals` 和 `0018_task_dispatches`。
+> 必须先备份，再暂停旧 scheduler、执行迁移、切换 Worker、核对历史队列，最后恢复 scheduler。
+> 请按[账号与任务队列专用升级指南](docs/upgrading-accounts-and-queues.md)操作；不要清空 Redis 队列或只替换镜像。
 
 ## 为什么选择 SynapseKB
 
@@ -54,7 +68,7 @@ Wiki、时间关系图和 MCP/Skill 集成放在一个清晰的私有部署产�
 | Wiki | 独立 Wiki 空间、节点 Markdown、来源与双链、版本历史、原子发布、增量更新、健康检查、相似节点合并与撤销 |
 | 时间关系图 | 页面、文档和主题级节点/边；局部子图加载、节点类型过滤、时间过滤、关系证据和页面跳转 |
 | MCP 与 Skill | Remote Streamable HTTP MCP、Bearer PAT、Scope、审计、stdio 代理，以及适用于 Codex/WorkBuddy 的四个 Skill |
-| 管理与安全 | 管理员/普通用户、知识库与 Agent 授权、模型分模块配置、OCR/对象存储在线配置、任务中心、审计和限流 |
+| 管理与安全 | 超级管理员/管理员/普通用户、账号审批、知识库成员与 Agent 授权、模型分模块配置、OCR/对象存储在线配置、任务中心、审计和限流 |
 
 ### 文档格式说明
 
@@ -141,7 +155,7 @@ docker compose ps
 
 API 首次启动会自动执行 Alembic 数据库迁移。
 
-### 3. 创建首个管理员
+### 3. 创建首个超级管理员
 
 ```bash
 docker compose exec api synapsekb-admin \
@@ -149,7 +163,7 @@ docker compose exec api synapsekb-admin \
   --name 管理员
 ```
 
-命令会交互式读取并确认密码，不需要 `create` 子命令，也不要把密码写入命令行或 `.env`。
+命令创建超级管理员并交互式读取、确认密码，不需要 `create` 子命令，也不要把密码写入命令行或 `.env`。
 
 ### 4. 完成初始化
 
@@ -268,6 +282,14 @@ RUN_DOCKER_TESTS=1 uv run pytest -m integration
 
 ## 更新已有部署
 
+首次升级到账号审批和统一任务投递版本（迁移 `0017` / `0018`）时，先按
+[专用升级流程](docs/upgrading-accounts-and-queues.md)暂停旧 scheduler、迁移、切换 Worker、
+检查并去重历史消息，最后恢复 scheduler。不要直接套用下方常规更新步骤。
+
+账号管理新增“账号审批”和“知识库权限”：管理员申请新增普通用户，由超级管理员审批；
+按知识库分配可见成员。现有最早的启用管理员自动升级为超级管理员。
+文档页可按上传/来源时间组合筛选，并支持网页和可公开读取的公众号链接导入。
+
 升级前先备份 PostgreSQL、对象存储和主密钥，再更新代码、构建镜像并显式执行迁移：
 
 ```bash
@@ -297,6 +319,7 @@ curl -f http://127.0.0.1:8088/api/v1/health
 | [API 说明](docs/api.md) | JWT/PAT、上传、检索、SSE、Agent 和 Wiki API |
 | [模型配置](docs/models.md) | 模块绑定、供应商兼容、测试与观测 |
 | [部署与升级](docs/deployment.md) | 生产基线、HTTPS、迁移和升级 |
+| [v0.1.1 账号与队列升级](docs/upgrading-accounts-and-queues.md) | 账号审批、成员权限、迁移顺序、历史消息去重与补投 |
 | [备份与恢复](docs/backup-and-restore.md) | PostgreSQL、对象存储和主密钥恢复 |
 | [安全模型](docs/security.md) | 权限、令牌、SSRF、上传和日志安全 |
 | [测试与验收](docs/testing.md) | 单元、集成、E2E 与负载测试 |

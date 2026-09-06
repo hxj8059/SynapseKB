@@ -1,5 +1,24 @@
 # MCP 接入
 
+## 网页 / 微信公众号导入
+
+新增写工具 `document_import_url`，参数示例：
+
+```json
+{
+  "knowledge_base_id": "目标知识库 UUID",
+  "url": "https://mp.weixin.qq.com/s/文章标识",
+  "title": null,
+  "source_time": null
+}
+```
+
+需要管理员或超级管理员账号，以及 `document:write` Scope。调用前须取得用户对导入的确认。
+返回新文档及处理状态，后续通过 `document_get` 查询。不会授予内部知识分析 Agent 联网能力。
+公开可读的微信文章会提取标题、正文及明确的发布时间；手动传入的 `source_time` 优先。
+遇到微信验证、登录或已删除页面会返回明确错误，不会把验证页保存成文档；可在浏览器保存
+正文为 HTML/Markdown 后上传。服务端仍执行 SSRF、大小、类型及重复文件校验。
+
 ## 创建令牌
 
 在“访问令牌”页面创建 PAT。令牌只展示一次，数据库只保存 Hash。默认 Scope：

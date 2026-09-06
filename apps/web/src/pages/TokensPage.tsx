@@ -112,7 +112,7 @@ export function TokensPage() {
                 <input
                   type="checkbox"
                   checked={scopes.includes(scope)}
-                  disabled={writeScope && user?.role !== "admin"}
+                  disabled={writeScope && !(user && ["admin", "super_admin"].includes(user.role))}
                   onChange={(event) =>
                     setScopes((current) =>
                       event.target.checked

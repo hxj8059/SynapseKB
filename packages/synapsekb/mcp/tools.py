@@ -15,8 +15,6 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import ColumnElement, and_, exists, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.agent_runner.actors import execute_agent_run
-from apps.document_worker.actors import process_document
 from synapsekb.agent.tools import AgentToolContext, execute_tool
 from synapsekb.api.schemas import CitationRead, TimeFilter
 from synapsekb.auth.policy import (
@@ -47,6 +45,7 @@ from synapsekb.mcp.auth import McpPrincipal, principal_var
 from synapsekb.models.provider import DeterministicMockProvider, create_provider
 from synapsekb.retrieval.context import build_citation_context
 from synapsekb.storage.factory import create_runtime_storage
+from synapsekb.tasks.dispatch import add_dispatch, publish_pending
 from synapsekb.wiki.index import query_wiki_index
 from synapsekb.wiki.search import hybrid_wiki_search
 
@@ -82,7 +81,7 @@ async def tool_session(
         raise PermissionError(f"Token 缺少 Scope: {scope}")
     async with AsyncSessionFactory() as session:
         user = await session.get(User, principal.user_id)
-        if user is None or not user.is_active:
+        if user is None or not user.is_active or user.approval_status in {"pending", "rejected"}:
             raise PermissionError("用户不可用")
         succeeded = False
         try:
@@ -244,6 +243,30 @@ async def document_download(document_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def document_import_url(
+    knowledge_base_id: str,
+    url: str,
+    title: str | None = None,
+    source_time: str | None = None,
+) -> dict[str, Any]:
+    """导入公开网页或微信公众号正文并异步解析。写操作需管理员和 document:write。"""
+    from synapsekb.api.routes.documents import import_url_document
+    from synapsekb.api.schemas import UrlImportRequest
+
+    payload = UrlImportRequest.model_validate(
+        {
+            "knowledge_base_id": knowledge_base_id,
+            "url": url,
+            "title": title,
+            "source_time": source_time,
+        }
+    )
+    async with tool_session("document:write", "document_import_url") as (session, user, _):
+        document = await import_url_document(payload, user, session)
+        return _serialize_document(document)
+
+
+@mcp.tool()
 async def document_upload(
     knowledge_base_id: str,
     filename: str,
@@ -308,9 +331,10 @@ async def document_upload(
             stage="queued",
         )
         session.add(job)
+        add_dispatch(session, "document", job)
         document.status = "queued"
         await session.commit()
-        process_document.send(str(job.id))
+        await publish_pending()
         return _serialize_document(document)
 
 
@@ -524,7 +548,7 @@ async def rag_answer(
 
 
 def _agent_access_clause(user: User) -> ColumnElement[bool]:
-    if user.role == "admin":
+    if user.role in {"admin", "super_admin"}:
         return true()
     return and_(
         Agent.is_enabled.is_(True),
@@ -565,14 +589,15 @@ async def agent_run_start(agent_id: str, query: str) -> dict[str, Any]:
             raise ValueError("Agent 不存在或无权访问")
         run = AgentRun(agent_id=agent.id, user_id=user.id, status="queued", query=query)
         session.add(run)
+        add_dispatch(session, "agent", run)
         await session.commit()
-        execute_agent_run.send(str(run.id))
+        await publish_pending()
         return {"run_id": str(run.id), "status": run.status}
 
 
 async def _owned_run(session: AsyncSession, user: User, run_id: str) -> AgentRun:
     clauses = [AgentRun.id == uuid.UUID(run_id)]
-    if user.role != "admin":
+    if user.role not in {"admin", "super_admin"}:
         clauses.append(AgentRun.user_id == user.id)
     run = await session.scalar(select(AgentRun).where(*clauses))
     if run is None:
@@ -675,9 +700,7 @@ async def wiki_index(
                     "parent_id": str(item.parent_id) if item.parent_id else None,
                     "title": item.title,
                     "node_type": item.node_type,
-                    "source_time": (
-                        item.source_time.isoformat() if item.source_time else None
-                    ),
+                    "source_time": (item.source_time.isoformat() if item.source_time else None),
                     "updated_at": item.updated_at.isoformat(),
                 }
                 for item in result.items
@@ -736,9 +759,7 @@ async def wiki_search(
                     "title": item.title,
                     "summary": item.summary,
                     "node_type": item.node_type,
-                    "source_time": (
-                        item.source_time.isoformat() if item.source_time else None
-                    ),
+                    "source_time": (item.source_time.isoformat() if item.source_time else None),
                     "relevance_score": item.relevance_score,
                     "semantic_score": item.semantic_score,
                     "keyword_score": item.keyword_score,
@@ -752,7 +773,7 @@ async def wiki_search(
             "keyword_candidate_count": result.keyword_candidate_count,
             "selection_required": (
                 "相关性分数仅用于候选排序；请由调用模型确认真正相关的节点后再读取正文"
-            )
+            ),
         }
 
 

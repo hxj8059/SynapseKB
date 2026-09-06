@@ -9,6 +9,7 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { DateTimePicker } from "../components/ui/date-time-picker";
 import { Select } from "../components/ui/select";
+import { Input } from "../components/ui/input";
 import { api, download } from "../lib/api";
 import type { Document, KnowledgeBase, ProviderModel } from "../lib/types";
 import { useAuthStore } from "../stores/auth";
@@ -24,6 +25,18 @@ export function KnowledgeBaseDetailPage() {
   const input = useRef<HTMLInputElement>(null);
   const client = useQueryClient();
   const [sourceTime, setSourceTime] = useState("");
+  const [importUrl, setImportUrl] = useState("");
+  const emptyFilters = { name: "", status: "", created_from: "", created_to: "", source_from: "", source_to: "", include_unknown: false };
+  const [filterDraft, setFilterDraft] = useState(emptyFilters);
+  const [filters, setFilters] = useState(emptyFilters);
+  const documentParams = new URLSearchParams({ knowledge_base_id: id });
+  if (filters.name) documentParams.set("name", filters.name);
+  if (filters.status) documentParams.set("status", filters.status);
+  for (const field of ["created_from", "created_to", "source_from", "source_to"] as const) {
+    if (filters[field]) documentParams.set(field, new Date(filters[field]).toISOString());
+  }
+  if (filters.include_unknown) documentParams.set("include_unknown", "true");
+  const filterQuery = documentParams.toString();
   const [wikiNodeTypes, setWikiNodeTypes] = useState("");
   const [wikiGenerationPrompt, setWikiGenerationPrompt] = useState("");
   const [embeddingModelId, setEmbeddingModelId] = useState("");
@@ -42,9 +55,9 @@ export function KnowledgeBaseDetailPage() {
     queryFn: () => api<KnowledgeBase>(`/knowledge-bases/${id}`),
     enabled: Boolean(id),
   });
-  const { data: documents = [], refetch } = useQuery({
-    queryKey: ["documents", id, documentPage],
-    queryFn: () => api<Document[]>(`/documents?knowledge_base_id=${id}&limit=${documentPageSize}&offset=${(documentPage - 1) * documentPageSize}`),
+  const { data: documents = [], refetch, error: documentsError } = useQuery({
+    queryKey: ["documents", id, filterQuery, documentPage],
+    queryFn: () => api<Document[]>(`/documents?${filterQuery}&limit=${documentPageSize}&offset=${(documentPage - 1) * documentPageSize}`),
     enabled: Boolean(id),
     refetchInterval: (query) =>
       query.state.data?.some((document) =>
@@ -54,14 +67,14 @@ export function KnowledgeBaseDetailPage() {
         : false,
   });
   const { data: documentCount = { count: 0 } } = useQuery({
-    queryKey: ["document-count", id],
-    queryFn: () => api<{ count: number }>(`/documents/count?knowledge_base_id=${id}`),
+    queryKey: ["document-count", id, filterQuery],
+    queryFn: () => api<{ count: number }>(`/documents/count?${filterQuery}`),
     enabled: Boolean(id),
   });
   const { data: models = [] } = useQuery({
     queryKey: ["models"],
     queryFn: () => api<ProviderModel[]>("/models"),
-    enabled: user?.role === "admin",
+    enabled: Boolean(user && ["admin", "super_admin"].includes(user.role)),
   });
   useEffect(() => {
     if (!knowledgeBase) return;
@@ -123,6 +136,16 @@ export function KnowledgeBaseDetailPage() {
     mutationFn: (document: Document) =>
       download(`/documents/${document.id}/download`, document.filename),
   });
+  const importWebpage = useMutation({
+    mutationFn: () => api<Document>("/documents/import-url", {
+      method: "POST", body: JSON.stringify({ knowledge_base_id: id, url: importUrl.trim(), source_time: sourceTime ? new Date(sourceTime).toISOString() : null }),
+    }),
+    onSuccess: () => {
+      setImportUrl(""); setDocumentPage(1);
+      client.invalidateQueries({ queryKey: ["documents", id] });
+      client.invalidateQueries({ queryKey: ["document-count", id] });
+    },
+  });
 
   return (
     <>
@@ -131,7 +154,7 @@ export function KnowledgeBaseDetailPage() {
         title={knowledgeBase?.name ?? "知识库"}
         description={knowledgeBase?.description}
         actions={
-          user?.role === "admin" ? (
+          Boolean(user && ["admin", "super_admin"].includes(user.role)) ? (
             <div className="flex items-center gap-2">
               <div className="w-56 text-xs text-[var(--muted)]">
                 <DateTimePicker
@@ -167,7 +190,16 @@ export function KnowledgeBaseDetailPage() {
           {upload.error.message}
         </p>
       )}
-      {user?.role === "admin" && knowledgeBase?.wiki_enabled && (
+      {Boolean(user && ["admin", "super_admin"].includes(user.role)) && <Card className="mb-5 p-5">
+        <form className="flex flex-wrap gap-3" onSubmit={(event) => { event.preventDefault(); importWebpage.mutate(); }}>
+          <Input className="min-w-60 flex-1" aria-label="网页链接" type="url" placeholder="粘贴网页或微信公众号文章链接" required value={importUrl} onChange={(event) => setImportUrl(event.target.value)} />
+          <Button type="submit" disabled={importWebpage.isPending}>{importWebpage.isPending ? "正在读取…" : "导入链接"}</Button>
+        </form>
+        <p className="mt-2 text-xs text-[var(--muted)]">导入后自动解析与索引；需要微信验证的文章可保存正文为 HTML/Markdown 后上传。来源时间可使用上方选择器指定。</p>
+        {importWebpage.error && <p role="alert" className="mt-3 text-sm text-red-500">{importWebpage.error.message}</p>}
+        {importWebpage.isSuccess && <p role="status" className="mt-3 text-sm text-emerald-600">文章已导入，正在排队处理。</p>}
+      </Card>}
+      {Boolean(user && ["admin", "super_admin"].includes(user.role)) && knowledgeBase?.wiki_enabled && (
         <Card className="mb-5 p-5">
           <div>
             <h2 className="font-semibold">模块模型与 Wiki 配置</h2>
@@ -338,6 +370,19 @@ export function KnowledgeBaseDetailPage() {
         </Card>
       )}
       <Card className="overflow-hidden">
+        <form className="border-b border-[var(--border)] p-5" onSubmit={(event) => { event.preventDefault(); setFilters(filterDraft); setDocumentPage(1); }}>
+          <div className="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <label className="text-sm">文档名称<Input className="mt-2" aria-label="文档名称筛选" placeholder="搜索标题" value={filterDraft.name} onChange={(event) => setFilterDraft({ ...filterDraft, name: event.target.value })} /></label>
+            <div className="text-sm"><p className="mb-2">处理状态</p><Select ariaLabel="文档状态" value={filterDraft.status} onValueChange={(status) => setFilterDraft({ ...filterDraft, status })} placeholder="全部状态" clearable options={[{ value: "ready", label: "可检索" }, { value: "queued", label: "排队中" }, { value: "processing", label: "处理中" }, { value: "failed", label: "失败" }, { value: "cancelled", label: "已取消" }]} /></div>
+            {([{ key: "created_from", label: "上传时间 · 从" }, { key: "created_to", label: "上传时间 · 到" }, { key: "source_from", label: "来源时间 · 从" }, { key: "source_to", label: "来源时间 · 到" }] as const).map(({ key, label }) => <div key={key} className="text-sm"><p className="mb-2">{label}</p><DateTimePicker ariaLabel={label} value={filterDraft[key]} onValueChange={(value) => setFilterDraft({ ...filterDraft, [key]: value })} placeholder="不限" /></div>)}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <label className="mr-auto flex items-center gap-2 text-sm text-[var(--muted)]"><input type="checkbox" checked={filterDraft.include_unknown} onChange={(event) => setFilterDraft({ ...filterDraft, include_unknown: event.target.checked })} />来源时间筛选包含未知日期</label>
+            <Button type="button" variant="ghost" onClick={() => { setFilterDraft(emptyFilters); setFilters(emptyFilters); setDocumentPage(1); }}>重置</Button>
+            <Button type="submit">筛选文档</Button>
+          </div>
+          {documentsError && <p role="alert" className="mt-3 text-sm text-red-500">{documentsError.message}</p>}
+        </form>
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
           <div>
             <h2 className="font-semibold">文档</h2>
@@ -350,7 +395,7 @@ export function KnowledgeBaseDetailPage() {
         <div className="divide-y divide-[var(--border)]">
           {documents.length === 0 ? (
             <div className="px-5 py-16 text-center text-sm text-[var(--muted)]">
-              还没有文档。上传后会进入真实解析与索引任务。
+              没有符合条件的文档。可以调整筛选条件或上传新文档。
             </div>
           ) : (
             documents.map((document) => (
@@ -367,6 +412,7 @@ export function KnowledgeBaseDetailPage() {
                   </Link>
                   <div className="mt-1 flex flex-wrap gap-3 text-xs text-[var(--muted)]">
                     <span>{formatBytes(document.size_bytes)}</span>
+                    <span>上传时间：{new Date(document.created_at).toLocaleString("zh-CN")}</span>
                     <span>
                       source_time：
                       {document.source_time

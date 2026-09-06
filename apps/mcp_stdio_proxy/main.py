@@ -14,6 +14,7 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, Tool
+from synapsekb import __version__
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
@@ -77,7 +78,7 @@ async def remote_session(_server: Server[ClientSession]) -> AsyncIterator[Client
 
 server: Server[ClientSession] = Server(
     "synapsekb-mcp-proxy",
-    version="0.1.0",
+    version=__version__,
     lifespan=remote_session,
 )
 
@@ -105,7 +106,7 @@ async def _run() -> None:
             write_stream,
             InitializationOptions(
                 server_name="synapsekb-mcp-proxy",
-                server_version="0.1.0",
+                server_version=__version__,
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from redis.asyncio import Redis
 
+from synapsekb import __version__
 from synapsekb.api.errors import install_error_handlers
 from synapsekb.api.middleware import request_context_middleware
 from synapsekb.api.routes import router
@@ -32,7 +33,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="SynapseKB API",
-        version="0.1.0",
+        version=__version__,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         lifespan=lifespan,

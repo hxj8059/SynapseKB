@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 import pytest
 from synapsekb.agent import tools
 from synapsekb.agent.engine import _bounded_messages
@@ -68,6 +70,7 @@ async def test_compare_periods_executes_two_independent_searches(
         return {"time_filter": time_filter, "citations": []}
 
     monkeypatch.setattr(tools, "_search", fake_search)
+    monkeypatch.setattr(tools, "_authorize_context", AsyncMock())
     period_a = {
         "field": "source_time",
         "from": "2023-01-01T00:00:00+08:00",

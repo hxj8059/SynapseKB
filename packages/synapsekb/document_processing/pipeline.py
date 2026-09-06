@@ -25,6 +25,7 @@ from synapsekb.document_processing.parsers import NeedsOcrError, parse_document
 from synapsekb.models.provider import create_provider
 from synapsekb.storage.base import ObjectStorage
 from synapsekb.storage.factory import create_runtime_storage
+from synapsekb.tasks.dispatch import add_dispatch
 from synapsekb.temporal.source_time import extract_source_time
 from synapsekb.temporal.source_time_model import (
     SourceTimeJsonProvider,
@@ -137,6 +138,7 @@ async def process_document_job(job_id: uuid.UUID) -> str:
                             job.status = "queued"
                             job.stage = "waiting_ocr"
                             job.progress = 0.1
+                            add_dispatch(session, "ocr", job)
                             await session.commit()
                         return "waiting_ocr"
                     markdown = parsed.markdown

@@ -85,7 +85,7 @@ function Protected() {
 
 function AdminOnly() {
   const user = useAuthStore((state) => state.user);
-  return user?.role === "admin" ? <Outlet /> : <Navigate to="/" replace />;
+  return Boolean(user && ["admin", "super_admin"].includes(user.role)) ? <Outlet /> : <Navigate to="/" replace />;
 }
 
 export default function App() {

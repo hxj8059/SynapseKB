@@ -39,7 +39,7 @@ async def _jwt_user(raw_token: str, session: AsyncSession) -> User:
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
     user = await session.get(User, user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.approval_status in {"pending", "rejected"}:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不可用")
     return user
 
@@ -88,9 +88,7 @@ async def _pat_user(
 ) -> User:
     now = datetime.now(UTC)
     token = await session.scalar(
-        select(PersonalAccessToken).where(
-            PersonalAccessToken.token_hash == hash_token(raw_token)
-        )
+        select(PersonalAccessToken).where(PersonalAccessToken.token_hash == hash_token(raw_token))
     )
     if (
         token is None
@@ -103,7 +101,7 @@ async def _pat_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     user = await session.get(User, token.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.approval_status in {"pending", "rejected"}:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不可用")
     if required_scope.value not in token.scopes:
         await _record_pat_request(

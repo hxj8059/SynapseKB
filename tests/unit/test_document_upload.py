@@ -10,9 +10,7 @@ import pytest
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 from synapsekb.api.routes import documents as document_routes
-from synapsekb.database.models import Document, ProcessingJob, User
-
-from apps.document_worker import actors as document_actors
+from synapsekb.database.models import Document, ProcessingJob, TaskDispatch, User
 
 
 class _UploadSession:
@@ -80,11 +78,14 @@ async def test_upload_builds_job_before_timestamp_can_expire(
 
     monkeypatch.setattr(document_routes, "require_knowledge_base_access", allow_access)
     monkeypatch.setattr(document_routes, "create_runtime_storage", create_storage)
-    monkeypatch.setattr(
-        document_actors.process_document,
-        "send",
-        lambda job_id: sent_job_ids.append(job_id),
-    )
+
+    async def publish(*, dispatch_id: uuid.UUID) -> int:
+        dispatch = next(item for item in session.added if isinstance(item, TaskDispatch))
+        assert dispatch.id == dispatch_id
+        sent_job_ids.append(str(dispatch.task_id))
+        return 1
+
+    monkeypatch.setattr(document_routes, "publish_pending", publish)
 
     user = User(
         id=uuid.uuid4(),

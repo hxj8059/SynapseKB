@@ -11,7 +11,6 @@ from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
 from sqlalchemy import ColumnElement, and_, exists, func, or_, select, true
 
-from apps.agent_runner.actors import execute_agent_run
 from synapsekb.api.schemas import (
     AgentCreate,
     AgentRead,
@@ -36,6 +35,7 @@ from synapsekb.database.models import (
     agent_knowledge_bases,
     agent_users,
 )
+from synapsekb.tasks.dispatch import add_dispatch, publish_pending
 
 router = APIRouter()
 
@@ -74,7 +74,7 @@ async def _validate_agent_config(
 
 
 def _access_clause(user: CurrentUser) -> ColumnElement[bool]:
-    if user.role == "admin":
+    if user.role in {"admin", "super_admin"}:
         return true()
     return and_(
         Agent.is_enabled.is_(True),
@@ -234,8 +234,9 @@ async def start_agent_run(
         query=payload.query,
     )
     session.add(run)
+    dispatch = add_dispatch(session, "agent", run)
     await session.commit()
-    execute_agent_run.send(str(run.id))
+    await publish_pending(dispatch_id=dispatch.id)
     return run
 
 
@@ -293,7 +294,7 @@ async def _get_run(
     session: DatabaseSession,
 ) -> AgentRun:
     clauses = [AgentRun.id == run_id]
-    if user.role != "admin":
+    if user.role not in {"admin", "super_admin"}:
         clauses.append(AgentRun.user_id == user.id)
     run = await session.scalar(select(AgentRun).where(*clauses))
     if run is None:

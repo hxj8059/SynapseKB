@@ -41,7 +41,7 @@ async def authenticate_pat(raw_token: str) -> McpPrincipal | None:
         if token is None or (token.expires_at is not None and token.expires_at <= now):
             return None
         user = await session.get(User, token.user_id)
-        if user is None or not user.is_active:
+        if user is None or not user.is_active or user.approval_status in {"pending", "rejected"}:
             return None
         if token.last_used_at is None or (now - token.last_used_at).total_seconds() >= 300:
             token.last_used_at = now

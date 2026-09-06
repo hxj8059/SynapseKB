@@ -2,7 +2,8 @@ export type User = {
   id: string;
   email: string;
   display_name: string;
-  role: "admin" | "user";
+  role: "super_admin" | "admin" | "user";
+  approval_status?: "pending" | "approved" | "rejected";
   is_active: boolean;
   timezone: string;
   created_at: string;

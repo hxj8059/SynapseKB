@@ -9,14 +9,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from synapsekb.database.models import KnowledgeBase, KnowledgeBaseMember, User
 
 
+def is_admin(user: User) -> bool:
+    return user.role in {"admin", "super_admin"}
+
+
+def require_super_admin(user: User) -> None:
+    if user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
+
+
 def require_admin(user: User) -> None:
-    if user.role != "admin":
+    if not is_admin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
 
 
 def knowledge_base_access_clause(user: User) -> ColumnElement[bool]:
     active = KnowledgeBase.lifecycle_status == "active"
-    if user.role == "admin":
+    if is_admin(user):
         return and_(active, true())
     return and_(
         active,
@@ -41,7 +50,7 @@ async def require_knowledge_base_access(
     *,
     write: bool = False,
 ) -> KnowledgeBase:
-    if write and user.role != "admin":
+    if write and not is_admin(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="知识库写操作需要管理员权限",

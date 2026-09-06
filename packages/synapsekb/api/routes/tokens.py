@@ -46,7 +46,7 @@ async def create_token(
     session: DatabaseSession,
 ) -> PersonalAccessTokenCreated:
     scopes = set(payload.scopes)
-    if user.role != "admin" and not scopes.issubset(DEFAULT_MCP_SCOPES):
+    if user.role not in {"admin", "super_admin"} and not scopes.issubset(DEFAULT_MCP_SCOPES):
         raise HTTPException(status_code=403, detail="普通用户只能创建只读默认 Scope")
     if payload.expires_at and payload.expires_at <= datetime.now(UTC):
         raise HTTPException(status_code=422, detail="过期时间必须晚于当前时间")

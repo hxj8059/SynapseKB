@@ -215,7 +215,7 @@ export function WikiPage() {
       api<WikiEntityResolution[]>(
         `/wiki/${knowledgeBaseId}/entity-resolutions?decision=merge&limit=50`,
       ),
-    enabled: Boolean(knowledgeBaseId && showHealth && user?.role === "admin"),
+    enabled: Boolean(knowledgeBaseId && showHealth && Boolean(user && ["admin", "super_admin"].includes(user.role))),
   });
   const { data: candidateLeftPage } = useQuery({
     queryKey: ["wiki-candidate-page", selectedCandidate?.left_page_id],
@@ -424,7 +424,7 @@ export function WikiPage() {
                 label: knowledgeBase.name,
               }))}
             />
-            {user?.role === "admin" && (
+            {Boolean(user && ["admin", "super_admin"].includes(user.role)) && (
               <>
                 <Button
                   variant="secondary"
@@ -494,7 +494,7 @@ export function WikiPage() {
           {(incrementalUpdate.error || rebuild.error)?.message}
         </p>
       )}
-      {showHealth && user?.role === "admin" && (
+      {showHealth && Boolean(user && ["admin", "super_admin"].includes(user.role)) && (
         <Card className="mb-5 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -911,7 +911,7 @@ export function WikiPage() {
           <Card ref={contentRef} className="scroll-mt-6 p-7">
             <div className="flex items-start justify-between gap-3">
               <h1 className="text-2xl font-semibold">{page?.title}</h1>
-              {user?.role === "admin" && page && (
+              {Boolean(user && ["admin", "super_admin"].includes(user.role)) && page && (
                 <div className="flex gap-2">
                   <Button
                     variant="secondary"

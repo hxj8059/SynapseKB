@@ -4,9 +4,9 @@ import uuid
 
 from sqlalchemy import func, select
 
-from apps.wiki_worker.actors import generate_wiki
 from synapsekb.database.models import Document, KnowledgeBase, WikiSpace, WikiUpdateJob
 from synapsekb.database.session import AsyncSessionFactory
+from synapsekb.tasks.dispatch import add_dispatch, publish_pending
 from synapsekb.wiki.document_state import mark_documents_pending
 from synapsekb.wiki.model_selection import WikiModelConfigurationError, resolve_wiki_model
 
@@ -73,6 +73,8 @@ async def schedule_wiki_update(
                 except WikiModelConfigurationError:
                     return
                 queued.model_id = model.id
-        await session.commit()
         if should_send:
-            generate_wiki.send(str(queued.id))
+            add_dispatch(session, "wiki_update", queued)
+        await session.commit()
+    if should_send:
+        await publish_pending()

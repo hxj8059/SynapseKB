@@ -38,6 +38,44 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(20), default="user", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Shanghai")
+    approval_status: Mapped[str] = mapped_column(String(20), default="approved", index=True)
+
+
+class UserApprovalRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "user_approval_requests"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), unique=True
+    )
+    requested_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    reviewed_by_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    review_note: Mapped[str | None] = mapped_column(String(1000))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TaskDispatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "task_dispatches"
+    __table_args__ = (
+        UniqueConstraint("task_type", "task_id", name="uq_task_dispatch_identity"),
+        Index("ix_task_dispatch_recovery", "status", "available_at"),
+    )
+
+    task_type: Mapped[str] = mapped_column(String(40))
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    queue_name: Mapped[str] = mapped_column(String(40))
+    actor_name: Mapped[str] = mapped_column(String(80))
+    redis_message_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_summary: Mapped[str | None] = mapped_column(String(1000))
 
 
 class RefreshToken(UUIDPrimaryKeyMixin, Base):
@@ -96,9 +134,7 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(160), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
     visibility: Mapped[str] = mapped_column(String(20), default="users", index=True)
-    lifecycle_status: Mapped[str] = mapped_column(
-        String(32), default="active", index=True
-    )
+    lifecycle_status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     embedding_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("models.id", ondelete="SET NULL")
     )
@@ -318,7 +354,7 @@ class MessageCitation(UUIDPrimaryKeyMixin, Base):
         Uuid, ForeignKey("chat_messages.id", ondelete="CASCADE"), index=True
     )
     chunk_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("chunks.id", ondelete="SET NULL")
+        Uuid, ForeignKey("chunks.id", ondelete="SET NULL"), index=True
     )
     citation_number: Mapped[int] = mapped_column(Integer)
     document_title: Mapped[str] = mapped_column(String(500))
@@ -513,7 +549,7 @@ class WikiPageSource(UUIDPrimaryKeyMixin, Base):
         Uuid, ForeignKey("documents.id", ondelete="CASCADE"), index=True
     )
     chunk_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("chunks.id", ondelete="SET NULL")
+        Uuid, ForeignKey("chunks.id", ondelete="SET NULL"), index=True
     )
     paragraph_key: Mapped[str] = mapped_column(String(120))
     evidence_text: Mapped[str] = mapped_column(Text)

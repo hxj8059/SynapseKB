@@ -8,7 +8,7 @@
 - `POST /api/v1/auth/refresh` 旋转 Refresh Token；重用旧 Token 会撤销整个 Token Family。
 - 业务 API 使用 `Authorization: Bearer <access-token>`。
 - 文档上传的 `/documents/upload`、`/documents/uploads/init` 和
-  `/documents/uploads/complete` 也接受 `skbp_` Personal Access Token，但必须包含
+  `/documents/uploads/complete`、`/documents/import-url` 也接受 `skbp_` Personal Access Token，但必须包含
   `document:write` Scope。PAT 仍继承所属用户的 App 权限，当前知识库写操作仍要求管理员。
 - 其他 REST API 继续只接受 JWT；MCP 与 REST PAT 请求均使用同一套过期、撤销和 Scope
   校验。服务端不会保存 PAT 明文。
@@ -58,6 +58,28 @@ run.error
 `thinking.summary` 只包含可审计摘要，不包含模型隐藏思维链。
 
 ## 文档
+
+`GET /api/v1/documents` 和 `/documents/count` 接受相同的筛选条件：
+`knowledge_base_id`、`name`、`status`、`tag_ids`、`created_from/created_to`（上传时间）、
+`source_from/source_to`（内容时间）、`include_unknown`（包含未知内容时间）。日期时间必须带时区；
+上传时间与内容时间可以同时筛选，条件为 AND。列表支持 `limit/offset` 分页。
+旧版 `time_field/from_time/to_time` 参数仍可用。
+
+## 账号与成员管理
+
+- `POST /api/v1/users`：管理员提交普通用户申请；超级管理员直接创建已审批账号。
+- `GET /api/v1/users/approvals`：超级管理员看全部请求，管理员看自己提交的请求。
+- `POST /api/v1/users/approvals/{id}/review`：仅超级管理员，Body 为
+  `{"decision":"approved","note":"可选说明"}`；拒绝使用 `rejected`。
+- `GET /api/v1/users/knowledge-base-permissions`：读取知识库可见范围与成员。
+- `PUT /api/v1/users/knowledge-base-permissions/{kb_id}`：管理员设置
+  `{"visibility":"users","member_ids":["用户 UUID"]}`；全员可见使用 `visibility=all`。
+
+未审批账号不能登录；管理员不能绕过审批启用账号，也不能授予管理员角色。
+普通用户的 REST、Agent 和 MCP 读取均受知识库成员限制。管理员/超级管理员保留全库管理权限，
+部门资料隔离请给员工分配普通用户角色并选择“指定成员”。
+
+## 文档操作
 
 - `POST /api/v1/documents/upload`：开发环境小文件中转上传。
 - `POST /api/v1/documents/uploads/init` 与 `/uploads/complete`：对象存储直传。

@@ -36,12 +36,12 @@ export function KnowledgeBasesPage() {
   const { data: models = [] } = useQuery({
     queryKey: ["models"],
     queryFn: () => api<ProviderModel[]>("/models"),
-    enabled: user?.role === "admin",
+    enabled: Boolean(user && ["admin", "super_admin"].includes(user.role)),
   });
   const { data: users = [] } = useQuery({
     queryKey: ["users"],
     queryFn: () => api<User[]>("/users"),
-    enabled: user?.role === "admin",
+    enabled: Boolean(user && ["admin", "super_admin"].includes(user.role)),
   });
   const create = useMutation({
     mutationFn: () =>
@@ -99,7 +99,7 @@ export function KnowledgeBasesPage() {
         title="知识库"
         description="文档、时间和授权的边界。每个知识库拥有独立的检索范围与 Wiki。"
         actions={
-          user?.role === "admin" ? (
+          Boolean(user && ["admin", "super_admin"].includes(user.role)) ? (
             <Button onClick={() => setCreating((value) => !value)}>
               <Plus size={16} />
               新建知识库

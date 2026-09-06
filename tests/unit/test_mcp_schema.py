@@ -11,6 +11,7 @@ EXPECTED_TOOLS = {
     "document_get",
     "document_download",
     "document_upload",
+    "document_import_url",
     "knowledge_search",
     "timeline_search",
     "compare_periods",

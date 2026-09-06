@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 from synapsekb.api.routes import knowledge_bases as routes
-from synapsekb.database.models import KnowledgeBase
+from synapsekb.database.models import KnowledgeBase, TaskDispatch
 
 
 def _admin() -> SimpleNamespace:
@@ -62,8 +62,8 @@ async def test_delete_knowledge_base_creates_async_job(
         commit=AsyncMock(),
         refresh=AsyncMock(),
     )
-    send = MagicMock()
-    monkeypatch.setattr(routes.delete_knowledge_base, "send", send)
+    send = AsyncMock()
+    monkeypatch.setattr(routes, "publish_pending", send)
 
     job = await routes.delete_knowledge_base_request(
         knowledge_base.id,
@@ -76,5 +76,11 @@ async def test_delete_knowledge_base_creates_async_job(
     assert job.document_count == 2
     assert job.total_object_count == 3
     assert job.status == "queued"
-    send.assert_called_once_with(str(job.id))
+    dispatch = next(
+        call.args[0]
+        for call in session.add.call_args_list
+        if isinstance(call.args[0], TaskDispatch)
+    )
+    assert dispatch.task_id == job.id
+    send.assert_awaited_once_with(dispatch_id=dispatch.id)
     session.commit.assert_awaited_once()

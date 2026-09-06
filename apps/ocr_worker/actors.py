@@ -15,6 +15,7 @@ from synapsekb.document_processing.ocr_config import load_paddle_ocr_config
 from synapsekb.document_processing.paddleocr import OcrCancelled, PaddleOcrCloudClient
 from synapsekb.storage.factory import create_runtime_storage
 from synapsekb.tasks.broker import broker
+from synapsekb.tasks.dispatch import add_dispatch, run_dispatched
 from synapsekb.tasks.quota import distributed_quota
 
 dramatiq.set_broker(broker)
@@ -106,10 +107,8 @@ async def _run_ocr(job_id: uuid.UUID) -> None:
             job.status = "queued"
             job.stage = "ocr_completed"
             job.progress = 0.3
+            add_dispatch(session, "document_resume", job)
             await session.commit()
-    from apps.document_worker.actors import process_document
-
-    process_document.send(str(job_id))
 
 
 @dramatiq.actor(
@@ -121,11 +120,15 @@ async def _run_ocr(job_id: uuid.UUID) -> None:
 )
 def process_ocr(job_id: str) -> None:
     parsed_id = uuid.UUID(job_id)
-    try:
-        asyncio.run(_run_ocr(parsed_id))
-    except Exception as exc:
-        asyncio.run(_mark_ocr_failed(parsed_id, exc))
-        raise
+
+    async def work() -> None:
+        try:
+            await _run_ocr(parsed_id)
+        except Exception as exc:
+            await _mark_ocr_failed(parsed_id, exc)
+            raise
+
+    asyncio.run(run_dispatched("ocr", parsed_id, work))
 
 
 async def _mark_ocr_failed(job_id: uuid.UUID, exc: Exception) -> None:

@@ -42,7 +42,7 @@ const admin = [
   { to: "/admin/models", label: "模型设置", icon: Settings2 },
   { to: "/admin/ocr", label: "OCR 设置", icon: ScanText },
   { to: "/admin/storage", label: "对象存储", icon: Cloud },
-  { to: "/admin/users", label: "用户管理", icon: Users },
+  { to: "/admin/users", label: "账号管理", icon: Users },
   { to: "/admin/tasks", label: "任务中心", icon: ListChecks },
 ];
 
@@ -78,7 +78,7 @@ export function AppShell() {
           </div>
         </div>
         <nav className="mt-3 flex gap-1 overflow-x-auto pb-1">
-          {[...primary, ...(user?.role === "admin" ? admin : [])].map((item) => (
+          {[...primary, ...(Boolean(user && ["admin", "super_admin"].includes(user.role)) ? admin : [])].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -115,7 +115,7 @@ export function AppShell() {
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-[var(--border)] bg-[var(--sidebar)] px-4 py-5 lg:block">
         <Logo className="px-2" />
         <nav className="mt-10 space-y-1">
-          {[...primary, ...(user?.role === "admin" ? admin : [])].map((item) => (
+          {[...primary, ...(Boolean(user && ["admin", "super_admin"].includes(user.role)) ? admin : [])].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

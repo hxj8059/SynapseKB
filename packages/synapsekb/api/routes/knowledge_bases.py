@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import selectinload
 
-from apps.document_worker.maintenance_actors import delete_knowledge_base
 from synapsekb.api.schemas import (
     KnowledgeBaseCreate,
     KnowledgeBaseDeletionJobRead,
@@ -34,6 +33,7 @@ from synapsekb.models.provider import (
     create_provider,
     embedding_dimension_request_mode,
 )
+from synapsekb.tasks.dispatch import add_dispatch, publish_pending
 
 router = APIRouter()
 
@@ -405,18 +405,10 @@ async def delete_knowledge_base_request(
             created_at=datetime.now(UTC),
         )
     )
+    dispatch = add_dispatch(session, "kb_delete", job)
     await session.commit()
     await session.refresh(job)
-    try:
-        delete_knowledge_base.send(str(job.id))
-    except Exception as exc:
-        job.status = "failed"
-        job.stage = "enqueue_failed"
-        job.error_summary = f"删除任务入队失败：{type(exc).__name__}"[:1000]
-        job.finished_at = datetime.now(UTC)
-        knowledge_base.lifecycle_status = "deletion_failed"
-        await session.commit()
-        raise HTTPException(status_code=503, detail="删除任务入队失败，请稍后重试") from exc
+    await publish_pending(dispatch_id=dispatch.id)
     return job
 
 

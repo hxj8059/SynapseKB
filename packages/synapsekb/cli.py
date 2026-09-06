@@ -22,7 +22,7 @@ async def _create_admin(email: str, name: str, password: str) -> None:
             email=normalized,
             display_name=name,
             password_hash=hash_password(password),
-            role="admin",
+            role="super_admin",
             is_active=True,
         )
         session.add(user)
@@ -39,4 +39,4 @@ def create_admin(
     if password != confirmation:
         raise typer.BadParameter("两次密码不一致")
     asyncio.run(_create_admin(email, name, password))
-    typer.echo(f"已创建管理员 {email.lower()}")
+    typer.echo(f"已创建超级管理员 {email.lower()}")

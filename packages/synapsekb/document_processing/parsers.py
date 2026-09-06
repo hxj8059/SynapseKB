@@ -100,7 +100,8 @@ def _parse_html(path: Path) -> ParsedDocument:
     soup = BeautifulSoup(raw, "html.parser")
     for element in soup(["script", "style", "noscript"]):
         element.decompose()
-    text = "\n".join(line.strip() for line in soup.get_text("\n").splitlines() if line.strip())
+    article = soup.select_one("#js_content") or soup
+    text = "\n".join(line.strip() for line in article.get_text("\n").splitlines() if line.strip())
     return ParsedDocument(markdown=html.unescape(text), pages=[ParsedPage(1, text)])
 
 

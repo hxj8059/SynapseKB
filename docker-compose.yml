@@ -1,7 +1,7 @@
 name: synapsekb
 
 x-backend: &backend
-  image: synapsekb-backend:0.1.0
+  image: synapsekb-backend:0.1.1
   build:
     context: .
     dockerfile: deploy/docker/backend.Dockerfile
@@ -17,7 +17,7 @@ x-backend: &backend
 
 services:
   web:
-    image: synapsekb-web:0.1.0
+    image: synapsekb-web:0.1.1
     build:
       context: .
       dockerfile: apps/web/Dockerfile

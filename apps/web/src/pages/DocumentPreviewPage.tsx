@@ -20,7 +20,7 @@ export function DocumentPreviewPage() {
   const selectedChunkId = searchParams.get("chunk");
   const navigate = useNavigate();
   const client = useQueryClient();
-  const isAdmin = useAuthStore((state) => state.user?.role === "admin");
+  const isAdmin = useAuthStore((state) => Boolean(state.user && ["admin", "super_admin"].includes(state.user.role)));
   const [view, setView] = useState<"parsed" | "chunks">(
     selectedChunkId ? "chunks" : "parsed",
   );

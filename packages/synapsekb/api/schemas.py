@@ -29,6 +29,7 @@ class UserRead(ORMModel):
     is_active: bool
     timezone: str
     created_at: datetime
+    approval_status: str = "approved"
 
 
 class UserCreate(BaseModel):
@@ -41,8 +42,8 @@ class UserCreate(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, value: str) -> str:
-        if value not in {"admin", "user"}:
-            raise ValueError("role must be admin or user")
+        if value not in {"super_admin", "admin", "user"}:
+            raise ValueError("role must be super_admin, admin or user")
         return value
 
 
@@ -56,9 +57,37 @@ class UserUpdate(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_optional_role(cls, value: str | None) -> str | None:
-        if value is not None and value not in {"admin", "user"}:
-            raise ValueError("role must be admin or user")
+        if value is not None and value not in {"super_admin", "admin", "user"}:
+            raise ValueError("role must be super_admin, admin or user")
         return value
+
+
+class UserApprovalRead(ORMModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    requested_by_id: uuid.UUID
+    reviewed_by_id: uuid.UUID | None
+    status: str
+    review_note: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+
+
+class UserApprovalDecision(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=1000)
+
+
+class KnowledgeBaseMembersRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    visibility: str
+    member_ids: list[uuid.UUID]
+
+
+class KnowledgeBaseMembersUpdate(BaseModel):
+    visibility: Literal["all", "users"]
+    member_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10000)
 
 
 class LoginRequest(BaseModel):

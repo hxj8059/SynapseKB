@@ -10,7 +10,6 @@ from fastapi.responses import PlainTextResponse
 from pydantic import AwareDatetime
 from sqlalchemy import ColumnElement, and_, func, or_, select, true
 
-from apps.wiki_worker.actors import check_wiki_health, generate_wiki
 from synapsekb.api.schemas import (
     TimeFilter,
     WikiAddRelationRequest,
@@ -44,6 +43,7 @@ from synapsekb.database.models import (
     WikiUpdateJob,
 )
 from synapsekb.domain.enums import TimeField
+from synapsekb.tasks.dispatch import add_dispatch, publish_pending
 from synapsekb.wiki.document_state import (
     incremental_documents,
     mark_documents_pending,
@@ -953,8 +953,9 @@ async def start_wiki_generation(
     session.add(job)
     if documents:
         await mark_documents_pending(session, space_id=space.id, documents=documents)
+    dispatch = add_dispatch(session, "wiki_update", job)
     await session.commit()
-    generate_wiki.send(str(job.id))
+    await publish_pending(dispatch_id=dispatch.id)
     return job
 
 
@@ -1061,9 +1062,10 @@ async def retry_failed_wiki_documents(
         change_summary=f"准备补跑本批 {len(documents)} 份失败或未完成文档",
     )
     session.add(retry_job)
+    add_dispatch(session, "wiki_update", retry_job)
     await mark_documents_pending(session, space_id=space.id, documents=documents)
     await session.commit()
-    generate_wiki.send(str(retry_job.id))
+    await publish_pending()
     return retry_job
 
 
@@ -1108,8 +1110,9 @@ async def start_wiki_health_check(
         auto_repair=payload.auto_repair,
     )
     session.add(job)
+    add_dispatch(session, "wiki_health", job)
     await session.commit()
-    check_wiki_health.send(str(job.id))
+    await publish_pending()
     return job
 
 

@@ -5,17 +5,16 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import aiofiles
 import httpx
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import RedirectResponse, StreamingResponse
-from pydantic import AwareDatetime
-from sqlalchemy import ColumnElement, and_, delete, exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from starlette.responses import Response
 
-from apps.document_worker.actors import process_document
 from synapsekb.api.schemas import (
     ChunkRead,
     DocumentRead,
@@ -43,10 +42,11 @@ from synapsekb.database.models import (
     WikiPageSource,
     document_tag_links,
 )
+from synapsekb.document_processing.list_filters import DocumentListFilters
 from synapsekb.document_processing.url_fetcher import fetch_public_document
 from synapsekb.document_processing.validation import safe_filename, validate_upload
-from synapsekb.domain.enums import TimeField
 from synapsekb.storage.factory import create_runtime_storage
+from synapsekb.tasks.dispatch import add_dispatch, publish_pending
 from synapsekb.wiki.scheduler import schedule_wiki_update
 
 router = APIRouter()
@@ -74,48 +74,15 @@ def _new_job(document: Document) -> ProcessingJob:
 async def list_documents(
     user: CurrentUser,
     session: DatabaseSession,
-    knowledge_base_id: uuid.UUID = Query(...),
-    status_filter: str | None = Query(default=None, alias="status"),
-    name: str | None = None,
-    tag_ids: list[uuid.UUID] = Query(default=[]),
-    time_field: TimeField = TimeField.SOURCE_TIME,
-    from_time: AwareDatetime | None = None,
-    to_time: AwareDatetime | None = None,
-    include_unknown: bool = False,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0, le=10_000_000),
+    filters: Annotated[DocumentListFilters, Query()],
 ) -> list[Document]:
-    await require_knowledge_base_access(session, user, knowledge_base_id)
-    if from_time is not None and to_time is not None and to_time < from_time:
-        raise HTTPException(status_code=422, detail="to_time 必须晚于 from_time")
-    query = select(Document).where(Document.knowledge_base_id == knowledge_base_id)
-    if status_filter:
-        query = query.where(Document.status == status_filter)
-    if name:
-        query = query.where(Document.title.ilike(f"%{name}%"))
-    if tag_ids:
-        query = query.where(
-            exists(
-                select(document_tag_links.c.document_id).where(
-                    document_tag_links.c.document_id == Document.id,
-                    document_tag_links.c.tag_id.in_(tag_ids),
-                )
-            )
-        )
-    if from_time is not None or to_time is not None:
-        column = {
-            TimeField.SOURCE_TIME: Document.source_time,
-            TimeField.CREATED_AT: Document.created_at,
-            TimeField.UPDATED_AT: Document.updated_at,
-        }[time_field]
-        time_clauses: list[ColumnElement[bool]] = [column.is_not(None)]
-        if from_time is not None:
-            time_clauses.append(column >= from_time)
-        if to_time is not None:
-            time_clauses.append(column <= to_time)
-        known = and_(*time_clauses)
-        query = query.where(or_(known, column.is_(None)) if include_unknown else known)
-    query = query.order_by(Document.updated_at.desc(), Document.id).offset(offset).limit(limit)
+    await require_knowledge_base_access(session, user, filters.knowledge_base_id)
+    query = select(Document).where(*filters.clauses())
+    query = (
+        query.order_by(Document.updated_at.desc(), Document.id)
+        .offset(filters.offset)
+        .limit(filters.limit)
+    )
     return list((await session.scalars(query)).all())
 
 
@@ -123,12 +90,10 @@ async def list_documents(
 async def count_documents(
     user: CurrentUser,
     session: DatabaseSession,
-    knowledge_base_id: uuid.UUID = Query(...),
+    filters: Annotated[DocumentListFilters, Query()],
 ) -> dict[str, int]:
-    await require_knowledge_base_access(session, user, knowledge_base_id)
-    count = await session.scalar(
-        select(func.count(Document.id)).where(Document.knowledge_base_id == knowledge_base_id)
-    )
+    await require_knowledge_base_access(session, user, filters.knowledge_base_id)
+    count = await session.scalar(select(func.count(Document.id)).where(*filters.clauses()))
     return {"count": int(count or 0)}
 
 
@@ -201,13 +166,14 @@ async def upload_document(
         # attribute access attempt async I/O (SQLAlchemy MissingGreenlet).
         job = _new_job(document)
         session.add(job)
+        dispatch = add_dispatch(session, "document", job)
         document.status = "queued"
         await session.commit()
         # The UPDATE uses a server-side onupdate expression, so SQLAlchemy expires
         # updated_at after commit. Refresh explicitly before FastAPI serializes the
         # ORM object; implicit async loading during serialization is not allowed.
         await session.refresh(document)
-        process_document.send(str(job.id))
+        await publish_pending(dispatch_id=dispatch.id)
         return document
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -314,10 +280,11 @@ async def complete_direct_upload(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     job = _new_job(document)
     session.add(job)
+    dispatch = add_dispatch(session, "document", job)
     document.status = "queued"
     await session.commit()
     await session.refresh(document)
-    process_document.send(str(job.id))
+    await publish_pending(dispatch_id=dispatch.id)
     return document
 
 
@@ -372,7 +339,7 @@ async def create_document_tag(
 @router.post("/import-url", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
 async def import_url_document(
     payload: UrlImportRequest,
-    user: CurrentUser,
+    user: DocumentWriteUser,
     session: DatabaseSession,
 ) -> Document:
     await require_knowledge_base_access(
@@ -401,14 +368,14 @@ async def import_url_document(
     filename = f"web-{sha256[:12]}{fetched.suffix}"
     document = Document(
         knowledge_base_id=payload.knowledge_base_id,
-        title=(payload.title or fetched.final_url)[:500],
+        title=(payload.title or fetched.title or fetched.final_url)[:500],
         filename=filename,
         media_type=fetched.media_type,
         size_bytes=len(fetched.content),
         sha256=sha256,
         object_key="pending",
         status="uploaded",
-        source_time=payload.source_time,
+        source_time=payload.source_time or fetched.source_time,
         parse_config={
             "source_kind": "url",
             "requested_url": str(payload.url),
@@ -435,10 +402,11 @@ async def import_url_document(
         temporary_path.unlink(missing_ok=True)
     job = _new_job(document)
     session.add(job)
+    dispatch = add_dispatch(session, "document", job)
     document.status = "queued"
     await session.commit()
     await session.refresh(document)
-    process_document.send(str(job.id))
+    await publish_pending(dispatch_id=dispatch.id)
     return document
 
 
@@ -623,10 +591,11 @@ async def retry_document_job(
     await session.flush()
     job = _new_job(document)
     session.add(job)
+    dispatch = add_dispatch(session, "document", job)
     document.status = "queued"
     document.error_summary = None
     await session.commit()
-    process_document.send(str(job.id))
+    await publish_pending(dispatch_id=dispatch.id)
     return job
 
 

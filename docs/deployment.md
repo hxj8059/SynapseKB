@@ -103,6 +103,10 @@ HTTP endpoint、缺失的对象存储凭证和开发 JWT/主密钥。
 
 ## 升级
 
+首次升级至 `0017_account_approvals` / `0018_task_dispatches` 请使用
+[账号和队列专用升级流程](upgrading-accounts-and-queues.md)，包括暂停旧 scheduler、迁移、
+Worker 切换和历史消息原子去重。此后再使用下面的常规流程。
+
 1. 阅读版本说明并完成备份。
 2. 拉取固定镜像版本，不使用漂移的 `latest`。
 3. 先运行迁移的离线检查，再执行 `alembic upgrade head`。

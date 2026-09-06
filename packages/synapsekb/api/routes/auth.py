@@ -46,6 +46,7 @@ async def login(
     if (
         user is None
         or not user.is_active
+        or user.approval_status in {"pending", "rejected"}
         or not verify_password(payload.password, user.password_hash)
     ):
         raise HTTPException(
@@ -100,7 +101,7 @@ async def refresh(
             await session.commit()
         raise HTTPException(status_code=401, detail="刷新令牌无效或已过期")
     user = await session.get(User, old_token.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.approval_status in {"pending", "rejected"}:
         raise HTTPException(status_code=401, detail="用户不可用")
     new_raw, new_hash = issue_opaque_token("skbr")
     new_refresh = RefreshToken(

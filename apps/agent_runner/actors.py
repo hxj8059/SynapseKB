@@ -4,13 +4,13 @@ import uuid
 from datetime import UTC, datetime
 
 import dramatiq
-from dramatiq.middleware import CurrentMessage
 from redis.asyncio import Redis
 from synapsekb.agent.engine import run_agent
 from synapsekb.config import get_settings
 from synapsekb.database.models import AgentRun
 from synapsekb.database.session import AsyncSessionFactory
 from synapsekb.tasks.broker import broker
+from synapsekb.tasks.dispatch import run_dispatched
 
 dramatiq.set_broker(broker)
 
@@ -26,16 +26,21 @@ MAX_AGENT_RETRIES = 2
 )
 def execute_agent_run(run_id: str) -> None:
     parsed_id = uuid.UUID(run_id)
-    try:
-        asyncio.run(run_agent(parsed_id))
-    except Exception as exc:
-        message = CurrentMessage.get_current_message()
-        retry_count = int(message.options.get("retries", 0)) if message is not None else 0
-        if retry_count < MAX_AGENT_RETRIES:
-            asyncio.run(_mark_agent_retrying(parsed_id, exc, retry_count + 1))
+
+    async def report_error(exc: Exception, retry: bool, attempt: int) -> None:
+        if retry:
+            await _mark_agent_retrying(parsed_id, exc, attempt)
         else:
-            asyncio.run(_mark_agent_failed(parsed_id, exc))
-        raise
+            await _mark_agent_failed(parsed_id, exc)
+
+    asyncio.run(
+        run_dispatched(
+            "agent",
+            parsed_id,
+            lambda: run_agent(parsed_id),
+            on_error=report_error,
+        )
+    )
 
 
 async def _mark_agent_retrying(run_id: uuid.UUID, exc: Exception, attempt: int) -> None:
@@ -44,7 +49,7 @@ async def _mark_agent_retrying(run_id: uuid.UUID, exc: Exception, attempt: int) 
         run = await session.get(AgentRun, run_id)
         if run is None or run.status in {"completed", "cancelled"}:
             return
-        run.status = "running"
+        run.status = "queued"
         run.error_summary = None
         run.finished_at = None
         await session.commit()
@@ -75,7 +80,7 @@ async def _mark_agent_failed(run_id: uuid.UUID, exc: Exception) -> None:
     summary = f"{type(exc).__name__}: {exc}"[:1000]
     async with AsyncSessionFactory() as session:
         run = await session.get(AgentRun, run_id)
-        if run is None or run.status in {"completed", "cancelled", "failed"}:
+        if run is None or run.status in {"completed", "cancelled"}:
             return
         run.status = "failed"
         run.error_summary = summary

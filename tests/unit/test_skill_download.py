@@ -4,7 +4,6 @@ from io import BytesIO
 from zipfile import ZipFile
 
 import pytest
-
 from synapsekb.api.routes import skills
 
 

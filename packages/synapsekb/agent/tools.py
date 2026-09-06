@@ -13,6 +13,7 @@ from sqlalchemy import ColumnElement, and_, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapsekb.api.schemas import SearchRequest, TimeFilter
+from synapsekb.auth.policy import knowledge_base_access_clause
 from synapsekb.database.models import (
     Document,
     KnowledgeBase,
@@ -217,11 +218,32 @@ async def _search(
     }
 
 
+async def _authorize_context(context: AgentToolContext) -> None:
+    await context.session.refresh(context.user)
+    if not context.user.is_active or context.user.approval_status in {"pending", "rejected"}:
+        raise PermissionError("账号不可用")
+    allowed = list(
+        (
+            await context.session.scalars(
+                select(KnowledgeBase.id).where(
+                    KnowledgeBase.id.in_(context.knowledge_base_ids),
+                    knowledge_base_access_clause(context.user),
+                )
+            )
+        ).all()
+    )
+    context.knowledge_base_ids = allowed
+    if not allowed:
+        raise PermissionError("当前用户无权访问请求的知识库")
+
+
 async def execute_tool(
     name: str,
     arguments: dict[str, Any],
     context: AgentToolContext,
 ) -> dict[str, Any]:
+    if name not in {"calculator", "current_time"}:
+        await _authorize_context(context)
     if name == "knowledge_search":
         return await _search(
             context,
@@ -342,9 +364,7 @@ async def execute_tool(
                         "title": item.title,
                         "summary": item.summary,
                         "node_type": item.node_type,
-                        "source_time": (
-                            item.source_time.isoformat() if item.source_time else None
-                        ),
+                        "source_time": (item.source_time.isoformat() if item.source_time else None),
                         "relevance_score": item.relevance_score,
                         "semantic_score": item.semantic_score,
                         "keyword_score": item.keyword_score,
@@ -357,10 +377,7 @@ async def execute_tool(
             )
             pages = ranked_pages[:limit]
             return {
-                "pages": [
-                    {**page, "rank": rank}
-                    for rank, page in enumerate(pages, 1)
-                ],
+                "pages": [{**page, "rank": rank} for rank, page in enumerate(pages, 1)],
                 "retrievals": retrievals,
                 "selection_required": (
                     "相关性分数仅用于候选排序；请先确认真正相关的节点，再读取正文和局部关系"

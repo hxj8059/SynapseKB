@@ -68,7 +68,7 @@ export function AgentsPage() {
   const { data: models = [] } = useQuery({
     queryKey: ["models"],
     queryFn: () => api<ProviderModel[]>("/models"),
-    enabled: user?.role === "admin",
+    enabled: Boolean(user && ["admin", "super_admin"].includes(user.role)),
   });
   const { data: knowledgeBases = [] } = useQuery({
     queryKey: ["knowledge-bases"],
@@ -77,7 +77,7 @@ export function AgentsPage() {
   const { data: users = [] } = useQuery({
     queryKey: ["users"],
     queryFn: () => api<User[]>("/users"),
-    enabled: user?.role === "admin",
+    enabled: Boolean(user && ["admin", "super_admin"].includes(user.role)),
   });
   const { data: run } = useQuery({
     queryKey: ["agent-run", runId],
@@ -199,7 +199,7 @@ export function AgentsPage() {
         title="知识分析 Agent"
         description="Agent 只能读取已授权的 SynapseKB 数据，具备步骤、时间和超时边界。"
         actions={
-          user?.role === "admin" ? (
+          Boolean(user && ["admin", "super_admin"].includes(user.role)) ? (
             <Button onClick={() => setCreating((value) => !value)}>
               <Plus size={16} />
               创建 Agent
@@ -468,7 +468,7 @@ export function AgentsPage() {
           </Card>
         </aside>
         <section>
-          {user?.role === "admin" && selectedAgent && (
+          {Boolean(user && ["admin", "super_admin"].includes(user.role)) && selectedAgent && (
             <Card className="mb-4 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>

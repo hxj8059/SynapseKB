@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-7254E8.svg"></a>
+  <img alt="Version 0.1.1" src="https://img.shields.io/badge/version-0.1.1-7254E8.svg">
   <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232A.svg?logo=react&logoColor=61DAFB">
   <img alt="PostgreSQL 16" src="https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?logo=postgresql&logoColor=white">
@@ -30,6 +31,19 @@ curate a Wiki → safely expose knowledge to external AI tools**.
 > This is an early, runnable open-source release. The core vertical workflows are implemented, but the
 > API, database schema, and UI may still evolve. Benchmark with representative data, review security,
 > and rehearse backup and recovery before production use.
+
+## What's new · v0.1.1 (2026-09-07)
+
+- **Three account roles and approvals:** super administrators approve or reject users requested by administrators under Account Management → Account Approvals. Pending accounts cannot sign in or use API keys. Existing accounts stay approved; the earliest active administrator is promoted to super administrator.
+- **Knowledge-base membership:** Account Management → Knowledge-base Permissions supports all-user access or selected members. App, REST, Agent, and MCP reads enforce the same permissions for regular users. Administrators and super administrators retain global access; use regular accounts for departmental isolation.
+- **Document date filters:** filter by title, status, upload time, and `source_time`. Upload/source ranges can be combined; filtering happens in the database before pagination.
+- **Web and WeChat imports:** a document-page URL form, REST endpoint, and the new `document_import_url` MCP tool share the import workflow. Writes require an administrator account and appropriate authorization. Publicly readable WeChat articles retain their title, body, and explicit publication time; verification, deleted, or restricted pages are rejected rather than indexed.
+- **Durable task delivery:** a transactional `task_dispatches` outbox, worker claim locks, heartbeats, and reconciliation replace queue-age-based redelivery. An upgrade tool atomically deduplicates queued messages and dispatches missing tasks. The existing scheduler is reused without adding a worker. Agent retry notifications are corrected, and Chunk reference foreign keys gain indexes.
+
+> [!IMPORTANT]
+> Upgrading an older installation applies `0016_chunk_ref_indexes`, `0017_account_approvals`, and `0018_task_dispatches`.
+> Back up first, pause the old scheduler, migrate, replace workers, audit the existing queues, then restart the scheduler.
+> Follow the [account and task-queue upgrade guide](docs/upgrading-accounts-and-queues.md) (Chinese). Do not purge Redis queues or merely replace the images.
 
 ## Why SynapseKB
 
@@ -57,7 +71,7 @@ curate a Wiki → safely expose knowledge to external AI tools**.
 | Wiki | Per-KB Wiki spaces, Markdown nodes, provenance and backlinks, version history, atomic publishing, incremental updates, health checks, reversible entity merges |
 | Temporal graph | Page, document, and topic nodes/edges; local subgraphs, type and time filters, relationship evidence, and page navigation |
 | MCP and Skills | Remote Streamable HTTP MCP, bearer PATs, scopes, auditing, a stdio proxy, and four Codex/WorkBuddy Skills |
-| Administration and security | Admin/user roles, KB and Agent grants, per-module model configuration, runtime OCR/storage settings, task center, auditing, and rate limiting |
+| Administration and security | Super-admin/admin/user roles, account approvals, KB membership and Agent grants, per-module model configuration, runtime OCR/storage settings, task center, auditing, and rate limiting |
 
 ### Document format notes
 
@@ -148,7 +162,7 @@ Default endpoints:
 
 The API automatically applies Alembic migrations on first startup.
 
-### 3. Create the first administrator
+### 3. Create the first super administrator
 
 ```bash
 docker compose exec api synapsekb-admin \
@@ -156,7 +170,7 @@ docker compose exec api synapsekb-admin \
   --name Administrator
 ```
 
-The command securely prompts for and confirms the password. There is no `create` subcommand. Never
+The command creates a super administrator and securely prompts for and confirms the password. There is no `create` subcommand. Never
 place the password in the command line or `.env`.
 
 ### 4. Finish initial setup
@@ -280,6 +294,16 @@ RUN_DOCKER_TESTS=1 uv run pytest -m integration
 
 ## Updating an existing deployment
 
+When upgrading to account approvals and durable task delivery (`0017` / `0018`) for the first time,
+follow the [dedicated upgrade procedure](docs/upgrading-accounts-and-queues.md): pause the old scheduler,
+migrate, replace workers, audit/deduplicate existing messages, then restart the scheduler.
+Do not use the routine steps below for that first upgrade.
+
+Account management now includes super-admin approval of administrator-created users and per-library
+membership settings. The earliest active administrator becomes the initial super administrator.
+Document browsing supports combined upload/source date filters. Web URLs and publicly readable
+WeChat articles can be imported through the UI, REST, or the `document_import_url` MCP tool.
+
 Back up PostgreSQL, object storage, and the master key before upgrading. Then update the code, build
 images, and apply migrations explicitly:
 
@@ -311,6 +335,7 @@ for the complete rollback and acceptance procedure.
 | [API guide](docs/api.md) | JWT/PAT, uploads, retrieval, SSE, Agent, and Wiki APIs |
 | [Model configuration](docs/models.md) | Module binding, provider compatibility, testing, and observability |
 | [Deployment and upgrades](docs/deployment.md) | Production baseline, HTTPS, migrations, and upgrades |
+| [v0.1.1 account and queue upgrade](docs/upgrading-accounts-and-queues.md) | Account approvals, KB membership, migration order, queue deduplication, and missing-message recovery (Chinese) |
 | [Backup and recovery](docs/backup-and-restore.md) | PostgreSQL, object storage, and master-key recovery |
 | [Security model](docs/security.md) | Authorization, tokens, SSRF, uploads, and logging security |
 | [Testing](docs/testing.md) | Unit, integration, E2E, and load tests |
