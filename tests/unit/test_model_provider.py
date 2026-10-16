@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from synapsekb.database.models import ProviderModel
@@ -45,9 +46,7 @@ class FakeChatCompletions:
             usage=SimpleNamespace(
                 prompt_tokens=10,
                 completion_tokens=20,
-                completion_tokens_details=SimpleNamespace(
-                    reasoning_tokens=self.reasoning_tokens
-                ),
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=self.reasoning_tokens),
             ),
         )
 
@@ -64,6 +63,72 @@ async def test_mock_embeddings_are_repeatable_and_dimensioned() -> None:
     assert first == second
     assert len(first[0]) == 8
     assert all(-1 <= value <= 1 for value in first[0])
+
+
+async def test_stream_closes_and_applies_request_scoped_timeouts_and_reasoning_control() -> None:
+    provider = OpenAICompatibleProvider(
+        api_key="test",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model_name="qwen-test",
+    )
+    events = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=None, reasoning_content="隐藏推理"),
+                    finish_reason=None,
+                )
+            ],
+            usage=None,
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="正文", reasoning_content=None),
+                    finish_reason="stop",
+                )
+            ],
+            usage=None,
+        ),
+        SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2)),
+    ]
+
+    class Stream:
+        close = AsyncMock()
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not events:
+                raise StopAsyncIteration
+            return events.pop(0)
+
+    stream = Stream()
+    completions = SimpleNamespace(create=AsyncMock(return_value=stream))
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    # with_options is synchronous in the SDK; capture its per-request overrides.
+    client.with_options = Mock(return_value=client)
+    provider.client = client
+    provider.quota = no_model_quota
+    result = [
+        part
+        async for part in provider.chat_stream(
+            [{"role": "user", "content": "回答"}],
+            max_tokens=4000,
+            disable_reasoning=True,
+            timeout_seconds=30,
+            max_retries=0,
+        )
+    ]
+    assert result == ["正文"]
+    assert provider.last_chat_finish_reason == "stop"
+    assert provider.last_chat_usage == {"prompt_tokens": 10, "completion_tokens": 2}
+    client.with_options.assert_called_once_with(timeout=30, max_retries=0)
+    assert completions.create.call_args.kwargs["extra_body"] == {"enable_thinking": False}
+    assert provider.chat_extra_body == {}
+    stream.close.assert_awaited_once()
+    await provider.http.aclose()
 
 
 async def test_dashscope_rerank_uses_plural_compatible_endpoint() -> None:
@@ -86,14 +151,20 @@ async def test_dashscope_rerank_uses_plural_compatible_endpoint() -> None:
 
 
 def test_full_operation_endpoint_is_normalized_to_api_root() -> None:
-    assert normalize_model_base_url(
-        "embedding",
-        "https://tokenhub.tencentmaas.com/v1/embeddings",
-    ) == "https://tokenhub.tencentmaas.com/v1"
-    assert normalize_model_base_url(
-        "chat",
-        "https://model.example/v1/chat/completions",
-    ) == "https://model.example/v1"
+    assert (
+        normalize_model_base_url(
+            "embedding",
+            "https://tokenhub.tencentmaas.com/v1/embeddings",
+        )
+        == "https://tokenhub.tencentmaas.com/v1"
+    )
+    assert (
+        normalize_model_base_url(
+            "chat",
+            "https://model.example/v1/chat/completions",
+        )
+        == "https://model.example/v1"
+    )
 
 
 async def test_tencent_embedding_uses_vendor_compatible_parameters() -> None:
@@ -254,10 +325,13 @@ def test_openai_compatible_reasoning_disable_adds_effective_gateway_flag() -> No
         "dashscope",
         {"enable_thinking": False},
     ) == {"enable_thinking": False}
-    assert effective_chat_extra_body(
-        "openai-compatible",
-        {"enable_thinking": False, "reasoning_effort": "low"},
-    )["reasoning_effort"] == "low"
+    assert (
+        effective_chat_extra_body(
+            "openai-compatible",
+            {"enable_thinking": False, "reasoning_effort": "low"},
+        )["reasoning_effort"]
+        == "low"
+    )
 
 
 def test_production_allows_plain_http_cloud_model() -> None:

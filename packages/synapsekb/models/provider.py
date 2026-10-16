@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, cast
@@ -127,6 +128,7 @@ class OpenAICompatibleProvider:
         # silently persisting it as a completed answer.
         self.last_chat_finish_reason: str | None = None
         self.last_chat_usage: dict[str, int | None] = {}
+        self.call_context: dict[str, str] = {}
         quota_digest = hashlib.sha256(f"{base_url}|{model_name}".encode()).hexdigest()[:24]
         self.quota_key = f"quota:model:{quota_digest}"
         self.client = AsyncOpenAI(
@@ -240,44 +242,83 @@ class OpenAICompatibleProvider:
         messages: Sequence[dict[str, str]],
         *,
         max_tokens: int | None = None,
-    ) -> AsyncIterator[str]:
+        disable_reasoning: bool = False,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+    ) -> AsyncGenerator[str, None]:
         started = time.perf_counter()
         self.last_chat_finish_reason = None
         self.last_chat_usage = {}
-        async with self.quota():
-            params: Any = {
-                "model": self.model_name,
-                "messages": list(messages),
-                "max_tokens": max_tokens,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-            }
-            if self.chat_extra_body:
-                params["extra_body"] = self.chat_extra_body
-            stream: Any = await self.client.chat.completions.create(
-                **params,
+        first_token_ms: int | None = None
+        response_ms: int | None = None
+        quota_wait_ms: int | None = None
+        reasoning_chars = 0
+        output_chars = 0
+        error: str | None = None
+        stream: Any = None
+        extra_body = self._chat_json_extra_body(disable_reasoning)
+        try:
+            async with self.quota():
+                quota_wait_ms = int((time.perf_counter() - started) * 1000)
+                params: Any = {
+                    "model": self.model_name,
+                    "messages": list(messages),
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                }
+                if extra_body:
+                    params["extra_body"] = extra_body
+                options: dict[str, Any] = {}
+                if timeout_seconds is not None:
+                    options["timeout"] = timeout_seconds
+                if max_retries is not None:
+                    options["max_retries"] = max_retries
+                client = self.client.with_options(**options) if options else self.client
+                stream = await client.chat.completions.create(**params)
+                response_ms = int((time.perf_counter() - started) * 1000)
+                async for event in stream:
+                    choice = event.choices[0] if event.choices else None
+                    delta = choice.delta.content if choice is not None else None
+                    reasoning_chars += (
+                        len(getattr(choice.delta, "reasoning_content", "") or "") if choice else 0
+                    )
+                    if delta:
+                        if first_token_ms is None:
+                            first_token_ms = int((time.perf_counter() - started) * 1000)
+                        output_chars += len(delta)
+                        yield delta
+                    if choice is not None and choice.finish_reason is not None:
+                        self.last_chat_finish_reason = str(choice.finish_reason)
+                    usage = getattr(event, "usage", None)
+                    if usage is not None:
+                        self.last_chat_usage = {
+                            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                            "completion_tokens": getattr(usage, "completion_tokens", None),
+                        }
+        except BaseException as exc:
+            error = type(exc).__name__
+            raise
+        finally:
+            if stream is not None:
+                await stream.close()
+            logger.info(
+                "model_call",
+                operation="chat_stream",
+                model=self.model_name,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                finish_reason=self.last_chat_finish_reason,
+                first_token_ms=first_token_ms,
+                response_ms=response_ms,
+                quota_wait_ms=quota_wait_ms,
+                input_chars=sum(len(message.get("content", "")) for message in messages),
+                output_chars=output_chars,
+                reasoning_chars=reasoning_chars,
+                reasoning_disable_requested=reasoning_disable_requested(extra_body),
+                error=error,
+                **self.call_context,
+                **self.last_chat_usage,
             )
-            async for event in stream:
-                choice = event.choices[0] if event.choices else None
-                delta = choice.delta.content if choice is not None else None
-                if delta:
-                    yield delta
-                if choice is not None and choice.finish_reason is not None:
-                    self.last_chat_finish_reason = str(choice.finish_reason)
-                usage = getattr(event, "usage", None)
-                if usage is not None:
-                    self.last_chat_usage = {
-                        "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                        "completion_tokens": getattr(usage, "completion_tokens", None),
-                    }
-        logger.info(
-            "model_call",
-            operation="chat_stream",
-            model=self.model_name,
-            latency_ms=int((time.perf_counter() - started) * 1000),
-            finish_reason=self.last_chat_finish_reason,
-            **self.last_chat_usage,
-        )
 
     async def chat_json(
         self,
@@ -324,6 +365,7 @@ class OpenAICompatibleProvider:
             reasoning_disable_requested=disable_requested,
             finish_reason=finish_reason,
             content_chars=len(content),
+            **self.call_context,
         )
         if finish_reason == "length":
             detail = f"completion_tokens={completion_tokens}"
@@ -414,6 +456,8 @@ class OpenAICompatibleProvider:
         *,
         max_tokens: int | None = None,
         use_tools: bool = True,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         async with self.quota():
@@ -427,7 +471,24 @@ class OpenAICompatibleProvider:
                 params["tool_choice"] = "auto"
             if self.chat_extra_body:
                 params["extra_body"] = self.chat_extra_body
-            response: Any = await self.client.chat.completions.create(**params)
+            options: dict[str, Any] = {}
+            if timeout_seconds is not None:
+                options["timeout"] = timeout_seconds
+            if max_retries is not None:
+                options["max_retries"] = max_retries
+            client = self.client.with_options(**options) if options else self.client
+            try:
+                response: Any = await client.chat.completions.create(**params)
+            except Exception as exc:
+                logger.warning(
+                    "model_call",
+                    operation="chat_tools",
+                    model=self.model_name,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    error=type(exc).__name__,
+                    **self.call_context,
+                )
+                raise
         if not response.choices:
             raise RuntimeError("模型没有返回任何候选结果")
         choice = response.choices[0]
@@ -443,10 +504,14 @@ class OpenAICompatibleProvider:
             model=self.model_name,
             latency_ms=int((time.perf_counter() - started) * 1000),
             finish_reason=finish_reason,
+            input_chars=len(json.dumps(list(messages), ensure_ascii=False, default=str)),
+            **self.call_context,
             **usage,
         )
+        serialized = cast(dict[str, Any], message.model_dump(exclude_none=True))
+        serialized.pop("reasoning_content", None)
         return {
-            **cast(dict[str, Any], message.model_dump(exclude_none=True)),
+            **serialized,
             "_finish_reason": finish_reason,
             "_usage": usage,
         }
@@ -566,11 +631,7 @@ def validate_model_transport(
 ) -> None:
     runtime_environment = environment or get_settings().environment
     parsed = urlsplit(base_url)
-    if (
-        runtime_environment == "production"
-        and provider != "ollama"
-        and parsed.scheme != "https"
-    ):
+    if runtime_environment == "production" and provider != "ollama" and parsed.scheme != "https":
         # Some private model gateways are only reachable over a trusted VPC.
         # Keep this deployment option available, but make the transport risk
         # visible without logging credentials, query parameters or prompts.

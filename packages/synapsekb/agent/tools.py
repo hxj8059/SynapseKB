@@ -37,6 +37,40 @@ class AgentToolContext:
     user: User
     knowledge_base_ids: list[uuid.UUID]
     time_filters: tuple[TimeFilter, ...] = ()
+    known_document_ids: set[str] | None = None
+    known_wiki_page_ids: set[str] | None = None
+
+
+def remember_tool_sources(context: AgentToolContext, result: Any) -> None:
+    if isinstance(result, dict):
+        document_id = result.get("document_id")
+        if document_id and context.known_document_ids is not None:
+            context.known_document_ids.add(str(document_id))
+        if context.known_wiki_page_ids is not None:
+            for page in result.get("pages", []):
+                if isinstance(page, dict) and page.get("id"):
+                    context.known_wiki_page_ids.add(str(page["id"]))
+        for value in result.values():
+            remember_tool_sources(context, value)
+    elif isinstance(result, list):
+        for value in result:
+            remember_tool_sources(context, value)
+
+
+def _check_known_source(name: str, arguments: dict[str, Any], context: AgentToolContext) -> None:
+    if name == "document_read":
+        key, known = "document_id", context.known_document_ids
+    elif name == "wiki_read":
+        key, known = "page_id", context.known_wiki_page_ids
+    else:
+        return
+    identifier = str(uuid.UUID(arguments[key]))
+    if known is not None and identifier not in known:
+        examples = ", ".join(sorted(known)[:8]) or "暂无，请先检索"
+        raise ValueError(
+            f"只能读取用户指定或检索工具已返回的 {key}，请复制完整 ID，不要猜测。"
+            f"可用 ID：{examples}"
+        )
 
 
 TIME_FILTER_SCHEMA: dict[str, Any] = {
@@ -319,6 +353,7 @@ async def execute_tool(
     arguments = prepare_tool_arguments(name, arguments, context)
     if name not in {"calculator", "current_time"}:
         await _authorize_context(context)
+    _check_known_source(name, arguments, context)
     if name == "knowledge_search":
         return await _search(
             context,

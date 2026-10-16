@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,28 @@ from synapsekb.database.models import Document, User
 
 def tool_context(*filters: TimeFilter) -> tools.AgentToolContext:
     return tools.AgentToolContext(AsyncMock(), User(), [], filters)
+
+
+async def test_unknown_document_id_is_rejected_before_reading_storage(monkeypatch) -> None:
+    context = tool_context()
+    context.known_document_ids = set()
+    monkeypatch.setattr(tools, "_authorize_context", AsyncMock())
+    with pytest.raises(ValueError, match="不要猜测"):
+        await tools.execute_tool("document_read", {"document_id": str(uuid.uuid4())}, context)
+    context.session.get.assert_not_awaited()
+
+
+def test_returned_sources_become_readable_and_survive_repeated_registration() -> None:
+    context = tool_context()
+    context.known_document_ids, context.known_wiki_page_ids = set(), set()
+    document_id, page_id = str(uuid.uuid4()), str(uuid.uuid4())
+    result = {"citations": [{"document_id": document_id}], "pages": [{"id": page_id}]}
+    tools.remember_tool_sources(context, result)
+    tools.remember_tool_sources(context, result)
+    tools._check_known_source("document_read", {"document_id": document_id}, context)
+    tools._check_known_source("wiki_read", {"page_id": page_id}, context)
+    assert context.known_document_ids == {document_id}
+    assert context.known_wiki_page_ids == {page_id}
 
 
 @pytest.mark.parametrize(
@@ -247,6 +270,7 @@ def test_no_temporal_intent_keeps_search_unfiltered() -> None:
 def test_agent_context_keeps_system_and_recent_messages_within_bound() -> None:
     messages = [
         {"role": "system", "content": "rules"},
+        {"role": "user", "content": "original question"},
         {"role": "user", "content": "old" * 100},
         {"role": "assistant", "content": "recent"},
         {"role": "user", "content": "latest"},
@@ -254,4 +278,5 @@ def test_agent_context_keeps_system_and_recent_messages_within_bound() -> None:
     bounded = _bounded_messages(messages, max_chars=180)
     assert bounded[0] == messages[0]
     assert bounded[-1] == messages[-1]
-    assert messages[1] not in bounded
+    assert messages[1] in bounded
+    assert messages[2] not in bounded

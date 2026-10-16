@@ -51,6 +51,7 @@ Agent 返回：
 run.started
 thinking.summary
 assistant.delta
+assistant.reset
 tool.started
 tool.finished
 citation
@@ -58,6 +59,10 @@ run.completed
 run.cancelled
 run.error
 ```
+
+`assistant.reset` 表示开始新一轮最终答案生成，消费方应清空上一轮部分正文。运行中的
+`result` 可能是尚未完成的内容；必须以 `status=completed` 判断成功。失败时部分正文和
+`error_summary` 可同时存在。执行预算、恢复与指标说明见[Agent 执行诊断](agent-execution.md)。
 
 `thinking.summary` 只包含可审计摘要，不包含模型隐藏思维链。
 

@@ -288,9 +288,11 @@ async def run_dispatched(
                 if current is not None:
                     attempt = current.attempts
                     current.error_summary = f"执行失败：{type(exc).__name__}"[:1000]
-                    retry = current.attempts <= TASKS[current.task_type][
-                        3
-                    ] and not await _business_done(session, current)
+                    retry = (
+                        getattr(exc, "retryable", True)
+                        and current.attempts <= TASKS[current.task_type][3]
+                        and not await _business_done(session, current)
+                    )
                     current.status = "pending" if retry else "failed"
                     if retry:
                         current.redis_message_id = str(uuid.uuid4())

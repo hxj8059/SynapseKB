@@ -549,12 +549,22 @@ export function AgentsPage() {
                   </div>
                 )}
                 <div className="mt-5">
+                  {run.result && run.status !== "completed" && (
+                    <p className="mb-3 text-xs text-[var(--muted)]" role="status">
+                      {["queued", "running"].includes(run.status)
+                        ? "答案生成中，以下内容尚未完成。"
+                        : "以下为未完成的部分内容，请勿视为完整分析结论。"}
+                    </p>
+                  )}
                   {run.result ? (
                     <MarkdownContent>{run.result}</MarkdownContent>
                   ) : (
                     <p className={`text-sm leading-7 ${run.error_summary ? "text-red-500" : "text-[var(--muted)]"}`}>
                       {run.error_summary || "Agent 正在调用内部知识工具…"}
                     </p>
+                  )}
+                  {run.result && run.error_summary && (
+                    <p className="mt-3 text-sm text-red-500" role="alert">{run.error_summary}</p>
                   )}
                 </div>
                 {run.citations.length > 0 && (

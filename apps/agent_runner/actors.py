@@ -22,7 +22,7 @@ MAX_AGENT_RETRIES = 2
     max_retries=MAX_AGENT_RETRIES,
     min_backoff=10_000,
     max_backoff=60_000,
-    time_limit=360_000,
+    time_limit=960_000,
 )
 def execute_agent_run(run_id: str) -> None:
     parsed_id = uuid.UUID(run_id)

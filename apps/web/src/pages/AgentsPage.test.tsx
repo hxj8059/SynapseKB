@@ -68,6 +68,28 @@ afterEach(() => {
 });
 
 describe("AgentsPage history", () => {
+  it("keeps a failed partial answer visibly incomplete and shows its error", async () => {
+    const partial = { ...run, status: "failed", result: "已经生成的部分内容", error_summary: "最终答案生成超时" };
+    useAuthStore.setState({
+      accessToken: "test-token", ready: true,
+      user: { id: "user-1", email: "user@example.com", display_name: "测试用户", role: "user",
+        is_active: true, timezone: "Asia/Shanghai", created_at: "2026-01-01T00:00:00Z" },
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/agents/agent-1/runs?")) return response({ items: [partial], total: 1, limit: 12, offset: 0 });
+      if (url.endsWith("/agents/runs/run-1")) return response(partial);
+      if (url.endsWith("/agents")) return response([agent]);
+      if (url.endsWith("/knowledge-bases")) return response([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: `打开历史：${run.query}` }));
+    expect(await screen.findByText("已经生成的部分内容")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("未完成的部分内容");
+    expect(screen.getByRole("alert")).toHaveTextContent("最终答案生成超时");
+  });
+
   it("lists prior runs and reopens the full answer", async () => {
     useAuthStore.setState({
       accessToken: "test-token",

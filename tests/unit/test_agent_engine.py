@@ -7,6 +7,7 @@ from synapsekb.agent.engine import (
     _looks_like_tool_protocol,
     _renumber_citations,
 )
+from synapsekb.agent.evidence import compact_evidence
 
 
 def test_bounded_messages_keeps_assistant_tool_exchange_atomic() -> None:
@@ -33,6 +34,7 @@ def test_bounded_messages_keeps_assistant_tool_exchange_atomic() -> None:
 
     assert [message["role"] for message in bounded] == [
         "system",
+        "user",
         "assistant",
         "tool",
         "tool",
@@ -161,3 +163,35 @@ def test_agent_citations_are_deduplicated_and_numbered_across_tools() -> None:
     assert len(citations) == 2
     assert len(added) == 1
     assert len(second_added) == 1
+
+
+def test_final_evidence_keeps_multiple_sources_and_original_numbers_within_budget() -> None:
+    citations = [
+        {
+            "citation_number": 3,
+            "document_id": "a",
+            "document_name": "来源甲",
+            "source_time": "2026-10-01",
+            "original_text": "甲的证据" * 3000,
+        },
+        {"citation_number": 7, "document_id": "a", "original_text": "甲的证据" * 3000},
+        {
+            "citation_number": 12,
+            "document_id": "b",
+            "document_name": "来源乙",
+            "source_time": "2026-10-02",
+            "original_text": "乙的证据" * 3000,
+        },
+    ]
+    evidence = compact_evidence(citations, max_chars=3000)
+    assert len(evidence) <= 3000
+    assert '"citation_number": 3' in evidence
+    assert '"citation_number": 12' in evidence
+    assert '"citation_number": 7' not in evidence
+    assert "来源甲" in evidence and "来源乙" in evidence
+    assert "2026-10-01" in evidence and "2026-10-02" in evidence
+
+
+def test_hidden_reasoning_is_not_sent_back_to_model() -> None:
+    messages = [{"role": "assistant", "content": "正文", "reasoning_content": "隐藏推理"}]
+    assert _complete_tool_call_history(messages) == [{"role": "assistant", "content": "正文"}]

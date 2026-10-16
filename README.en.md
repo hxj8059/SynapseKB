@@ -32,7 +32,19 @@ curate a Wiki → safely expose knowledge to external AI tools**.
 > API, database schema, and UI may still evolve. Benchmark with representative data, review security,
 > and rehearse backup and recovery before production use.
 
-## What's new · Agent time filtering fix (2026-10-16)
+## What's new · More reliable Agent answers (2026-10-16)
+
+- Stream final answers with reasoning disabled for that phase and display incremental content.
+- Compact and deduplicate evidence, reserve answer-generation time, and attempt one smaller recovery
+  request instead of repeatedly replaying the same failed final request.
+- Validate returned document IDs, completion markers and citation numbers; clearly label partial answers
+  and show their errors.
+- Log model latency, first-text latency, quota waits and completion reasons by run and phase.
+
+See [Agent execution diagnostics and optimization](docs/agent-execution.md) for behavior and troubleshooting
+details (Chinese).
+
+## Agent time filtering fix (2026-10-16)
 
 - **Natural-language time planning**: resolve relative dates, calendar periods, absolute dates,
   and comparisons through structured model output anchored to task creation time and the user's timezone.
