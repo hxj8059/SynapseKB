@@ -2,6 +2,10 @@
 
 启动后访问 `/api/docs` 查看交互式 OpenAPI，原始 Schema 位于 `/api/openapi.json`。
 
+需要把文件批量上传交给 AI Agent 时，可直接发送
+[Agent 批量上传 API 指南](agent-bulk-upload.md)，其中包含任务模板、PAT 权限、文件格式、
+multipart/对象存储直传、时间字段、去重、重试和异步状态查询规则。
+
 ## 认证
 
 - `POST /api/v1/auth/login` 返回 15 分钟 Access JWT，并设置 HttpOnly Refresh Cookie。
@@ -81,7 +85,7 @@ run.error
 
 ## 文档操作
 
-- `POST /api/v1/documents/upload`：开发环境小文件中转上传。
+- `POST /api/v1/documents/upload`：单文件 multipart 中转上传，支持 PAT；批量时由客户端逐文件调用。
 - `POST /api/v1/documents/uploads/init` 与 `/uploads/complete`：对象存储直传。
 - `POST /api/v1/documents/import-url`：带 SSRF 防护的网页导入，不执行 JavaScript。
 - `PATCH /api/v1/documents/{id}`：修改标题、`source_time` 和标签；时间同步到 Chunk。
