@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import operator
 import uuid
 from collections.abc import Callable
@@ -35,6 +36,90 @@ class AgentToolContext:
     session: AsyncSession
     user: User
     knowledge_base_ids: list[uuid.UUID]
+    time_filters: tuple[TimeFilter, ...] = ()
+
+
+TIME_FILTER_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "description": "结构化时间对象，不能传 JSON 字符串。from/to 必须包含时区。",
+    "properties": {
+        "field": {"type": "string", "enum": ["source_time", "created_at", "updated_at"]},
+        "from": {"type": ["string", "null"], "format": "date-time"},
+        "to": {"type": ["string", "null"], "format": "date-time"},
+        "include_unknown": {"type": "boolean"},
+    },
+}
+
+
+def _effective_time_filter(raw: Any, constraints: tuple[TimeFilter, ...]) -> dict[str, Any] | None:
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    requested = TimeFilter.model_validate(raw) if raw is not None else None
+    if not constraints:
+        return requested.model_dump(mode="json", by_alias=True) if requested else None
+    if len(constraints) > 1:
+        if requested is None:
+            raise ValueError("本次问题包含多个时期，必须分别指定时间范围或调用 compare_periods")
+        matching = [
+            item
+            for item in constraints
+            if item.field == requested.field
+            and not (item.to and requested.from_ and requested.from_ > item.to)
+            and not (item.from_ and requested.to and requested.to < item.from_)
+        ]
+        if len(matching) != 1:
+            raise ValueError("每次检索必须对应用户指定的一个独立时期，不能合并或跳过时间筛选")
+        required = matching[0]
+    else:
+        required = constraints[0]
+    # The user's resolved range is authoritative; model calls may only narrow it.
+    if requested is None or requested.field != required.field:
+        return required.model_dump(mode="json", by_alias=True)
+    starts = [value for value in (required.from_, requested.from_) if value is not None]
+    ends = [value for value in (required.to, requested.to) if value is not None]
+    effective = TimeFilter(
+        field=required.field,
+        from_=max(starts) if starts else None,
+        to=min(ends) if ends else None,
+        include_unknown=required.include_unknown and requested.include_unknown,
+    )
+    return effective.model_dump(mode="json", by_alias=True)
+
+
+def prepare_tool_arguments(
+    name: str,
+    arguments: dict[str, Any],
+    context: AgentToolContext,
+) -> dict[str, Any]:
+    prepared = dict(arguments)
+    if name in {"knowledge_search", "timeline_search", "wiki_search", "wiki_graph_search"}:
+        prepared["time_filter"] = _effective_time_filter(
+            arguments.get("time_filter"),
+            context.time_filters,
+        )
+        if name == "timeline_search" and prepared["time_filter"] is None:
+            raise ValueError("timeline_search 必须提供结构化时间范围")
+    elif name == "compare_periods":
+        for key in ("period_a", "period_b"):
+            prepared[key] = _effective_time_filter(arguments[key], context.time_filters)
+            if prepared[key] is None:
+                raise ValueError("compare_periods 必须提供两个独立的时间范围")
+    return prepared
+
+
+def _check_read_time(value: Any, time_filters: tuple[TimeFilter, ...]) -> None:
+    if not time_filters:
+        return
+    for time_filter in time_filters:
+        timestamp = getattr(value, time_filter.field.value)
+        if timestamp is None:
+            if time_filter.include_unknown:
+                return
+        elif (time_filter.from_ is None or timestamp >= time_filter.from_) and (
+            time_filter.to is None or timestamp <= time_filter.to
+        ):
+            return
+    raise ValueError("资料不在用户要求的时间范围内，不能作为本次问题的证据")
 
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -47,18 +132,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "time_filter": {
-                        "type": ["object", "null"],
-                        "properties": {
-                            "field": {
-                                "type": "string",
-                                "enum": ["source_time", "created_at", "updated_at"],
-                            },
-                            "from": {"type": ["string", "null"]},
-                            "to": {"type": ["string", "null"]},
-                            "include_unknown": {"type": "boolean"},
-                        },
-                    },
+                    "time_filter": TIME_FILTER_SCHEMA,
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 30},
                 },
                 "required": ["query"],
@@ -89,7 +163,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "time_filter": {"type": ["object", "null"]},
+                    "time_filter": TIME_FILTER_SCHEMA,
                     "limit": {"type": "integer", "minimum": 1, "maximum": 20},
                 },
                 "required": ["query"],
@@ -117,7 +191,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "time_filter": {"type": ["object", "null"]},
+                    "time_filter": TIME_FILTER_SCHEMA,
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                 },
                 "required": ["query"],
@@ -133,7 +207,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "time_filter": {"type": "object"},
+                    "time_filter": {**TIME_FILTER_SCHEMA, "type": "object"},
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 30},
                 },
                 "required": ["query", "time_filter"],
@@ -149,8 +223,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "period_a": {"type": "object"},
-                    "period_b": {"type": "object"},
+                    "period_a": {**TIME_FILTER_SCHEMA, "type": "object"},
+                    "period_b": {**TIME_FILTER_SCHEMA, "type": "object"},
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 20},
                 },
                 "required": ["query", "period_a", "period_b"],
@@ -242,6 +316,7 @@ async def execute_tool(
     arguments: dict[str, Any],
     context: AgentToolContext,
 ) -> dict[str, Any]:
+    arguments = prepare_tool_arguments(name, arguments, context)
     if name not in {"calculator", "current_time"}:
         await _authorize_context(context)
     if name == "knowledge_search":
@@ -288,6 +363,7 @@ async def execute_tool(
             or not document.parsed_text_key
         ):
             raise ValueError("文档不存在、未完成解析或不在 Agent 授权范围")
+        _check_read_time(document, context.time_filters)
         from synapsekb.storage.factory import create_runtime_storage
 
         storage = await create_runtime_storage(context.session)
@@ -392,6 +468,7 @@ async def execute_tool(
             )
             if page is None or page.current_version_id is None:
                 raise ValueError("Wiki 页面不存在或尚未发布")
+            _check_read_time(page, context.time_filters)
             version = await context.session.get(WikiPageVersion, page.current_version_id)
             source_rows = (
                 await context.session.execute(

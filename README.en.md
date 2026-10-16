@@ -32,7 +32,21 @@ curate a Wiki → safely expose knowledge to external AI tools**.
 > API, database schema, and UI may still evolve. Benchmark with representative data, review security,
 > and rehearse backup and recovery before production use.
 
-## What's new · v0.1.1 (2026-09-07)
+## What's new · Agent time filtering fix (2026-10-16)
+
+- **Natural-language time planning**: resolve relative dates, calendar periods, absolute dates,
+  and comparisons through structured model output anchored to task creation time and the user's timezone.
+- **Enforced filtering**: searches cannot remove or widen the resolved time constraints; document and
+  Wiki reads also check those constraints. Empty results do not trigger unrestricted historical searches.
+- **Stable retries and compatible arguments**: persist the initial time plan across retries and accept
+  time-filter objects that a model has encoded as JSON strings.
+- **Explicit evidence limits**: report ambiguous time requests and insufficient evidence without
+  inventing conclusions or citation numbers.
+
+No new database migration is required. See the [Agent time filtering release notes](docs/agent-time-filtering.md)
+for behavior changes, upgrade instructions, and validation details (Chinese).
+
+## v0.1.1 (2026-09-07)
 
 - **Three account roles and approvals:** super administrators approve or reject users requested by administrators under Account Management → Account Approvals. Pending accounts cannot sign in or use API keys. Existing accounts stay approved; the earliest active administrator is promoted to super administrator.
 - **Knowledge-base membership:** Account Management → Knowledge-base Permissions supports all-user access or selected members. App, REST, Agent, and MCP reads enforce the same permissions for regular users. Administrators and super administrators retain global access; use regular accounts for departmental isolation.

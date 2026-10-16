@@ -13,7 +13,17 @@ from redis.asyncio import Redis
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from synapsekb.agent.tools import TOOL_SCHEMAS, AgentToolContext, execute_tool
+from synapsekb.agent.temporal import (
+    agent_time_context,
+    load_agent_time_plan,
+    resolve_agent_time_plan,
+)
+from synapsekb.agent.tools import (
+    TOOL_SCHEMAS,
+    AgentToolContext,
+    execute_tool,
+    prepare_tool_arguments,
+)
 from synapsekb.auth.policy import knowledge_base_access_clause
 from synapsekb.config import get_settings
 from synapsekb.database.models import (
@@ -27,7 +37,6 @@ from synapsekb.database.models import (
 )
 from synapsekb.database.session import AsyncSessionFactory
 from synapsekb.models.provider import DeterministicMockProvider, create_provider
-from synapsekb.temporal.parser import resolve_time_ranges
 
 
 class AgentState(TypedDict):
@@ -81,6 +90,7 @@ def _final_synthesis_messages(
             "content": (
                 "你是 SynapseKB 的最终答案整理器。请仅依据用户问题和已经取得的内部知识证据，"
                 "直接输出一份完整、清晰的中文 Markdown 答案。保留证据中的全局 [n] 引用编号；"
+                "只能引用工具实际返回的 citation_number；空检索结果和工具步骤不能编造引用编号。"
                 "不得编造 [工具序号:引用序号] 之类的复合编号。证据不足"
                 "时明确说明。严禁继续请求任何工具，严禁输出 DSML、XML、JSON、tool_calls、invoke"
                 "或函数调用协议，也不要描述隐藏思维过程。"
@@ -177,9 +187,7 @@ async def run_agent(run_id: uuid.UUID) -> None:
 
     async with AsyncSessionFactory() as lock_session:
         locked = await lock_session.scalar(
-            text("SELECT pg_try_advisory_lock(hashtext(:key))").bindparams(
-                key=f"agent:{run_id}"
-            )
+            text("SELECT pg_try_advisory_lock(hashtext(:key))").bindparams(key=f"agent:{run_id}")
         )
         if not locked:
             return
@@ -187,9 +195,7 @@ async def run_agent(run_id: uuid.UUID) -> None:
             await _run_agent(run_id)
         finally:
             await lock_session.execute(
-                text("SELECT pg_advisory_unlock(hashtext(:key))").bindparams(
-                    key=f"agent:{run_id}"
-                )
+                text("SELECT pg_advisory_unlock(hashtext(:key))").bindparams(key=f"agent:{run_id}")
             )
             await lock_session.commit()
 
@@ -233,16 +239,49 @@ async def _run_agent(run_id: uuid.UUID) -> None:
             await provider.close()
             await redis.aclose()
             raise RuntimeError("当前用户无权访问 Agent 配置的任何知识库")
-        tool_context = AgentToolContext(session, user, knowledge_base_ids)
-        resolved = resolve_time_ranges(run.query, timezone=user.timezone)
-        time_summary = "\n".join(item.summary() for item in resolved)
-        run.resolved_time_summary = time_summary or None
         run.status = "running"
         run.error_summary = None
         run.finished_at = None
         run.started_at = run.started_at or datetime.now(UTC)
         await session.commit()
         await _publish(redis, run.id, "run.started", {"run_id": str(run.id)})
+        # Resolve once and persist before retrieval. Retries reuse the same clock and plan.
+        timezone = user.timezone or settings.default_timezone
+        execution_deadline = asyncio.get_running_loop().time() + agent.timeout_seconds
+        try:
+            time_plan = load_agent_time_plan(run.state_json)
+            if time_plan is None:
+                await _publish(
+                    redis, run.id, "thinking.summary", {"summary": "正在解析问题的时间范围。"}
+                )
+                async with asyncio.timeout_at(execution_deadline):
+                    time_plan = await resolve_agent_time_plan(
+                        provider,
+                        run.query,
+                        reference_time=run.created_at,
+                        timezone=timezone,
+                    )
+                run.state_json = {
+                    **run.state_json,
+                    "time_plan": time_plan.model_dump(mode="json", by_alias=True),
+                }
+            time_summary = agent_time_context(
+                time_plan,
+                reference_time=run.created_at,
+                timezone=timezone,
+            )
+            run.resolved_time_summary = time_summary
+            await session.commit()
+        except BaseException:
+            await provider.close()
+            await redis.aclose()
+            raise
+        tool_context = AgentToolContext(
+            session,
+            user,
+            knowledge_base_ids,
+            tuple(item.time_filter for item in time_plan.ranges),
+        )
         if time_summary:
             await _publish(
                 redis,
@@ -251,10 +290,26 @@ async def _run_agent(run_id: uuid.UUID) -> None:
                 {"summary": time_summary},
             )
 
+        system_message = {
+            "role": "system",
+            "content": (
+                f"{agent.system_prompt}\n\n"
+                "你只能调用已提供的 SynapseKB 内部只读工具。不得声称访问互联网、"
+                "执行代码或操作外部系统。时间过滤必须用结构化 time_filter；"
+                "跨时期比较必须调用 compare_periods 或分别检索。最终答案必须保留引用。"
+                "只能引用工具实际返回的 citation_number；空检索结果和工具步骤不能编造引用编号。"
+                f"\n\n时间解析摘要：\n{time_summary}"
+            ),
+        }
         initial_state: AgentState
         if run.state_json.get("messages"):
+            saved_messages = list(run.state_json["messages"])
+            if saved_messages[0].get("role") == "system":
+                saved_messages[0] = system_message
+            else:
+                saved_messages.insert(0, system_message)
             initial_state = {
-                "messages": run.state_json["messages"],
+                "messages": saved_messages,
                 "step": int(run.state_json.get("step", 0)),
                 "final_answer": run.state_json.get("final_answer"),
                 "citations": list(run.state_json.get("citations") or run.citations or []),
@@ -262,16 +317,7 @@ async def _run_agent(run_id: uuid.UUID) -> None:
         else:
             initial_state = {
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            f"{agent.system_prompt}\n\n"
-                            "你只能调用已提供的 SynapseKB 内部只读工具。不得声称访问互联网、"
-                            "执行代码或操作外部系统。时间过滤必须用结构化 time_filter；"
-                            "跨时期比较必须调用 compare_periods 或分别检索。最终答案必须保留引用。"
-                            f"\n\n时间解析摘要：\n{time_summary or '未识别到明确时间范围。'}"
-                        ),
-                    },
+                    system_message,
                     {"role": "user", "content": run.query},
                 ],
                 "step": 0,
@@ -286,6 +332,7 @@ async def _run_agent(run_id: uuid.UUID) -> None:
 
         async def persist_state(state: AgentState) -> None:
             run.state_json = {
+                **run.state_json,
                 "messages": state["messages"],
                 "step": state["step"],
                 "final_answer": state["final_answer"],
@@ -428,8 +475,8 @@ async def _run_agent(run_id: uuid.UUID) -> None:
                     parsed_arguments = json.loads(raw_arguments)
                     if not isinstance(parsed_arguments, dict):
                         raise ValueError("工具参数必须是 JSON 对象")
-                    arguments = parsed_arguments
-                except (json.JSONDecodeError, ValueError) as exc:
+                    arguments = prepare_tool_arguments(name, parsed_arguments, tool_context)
+                except (ValueError, TypeError, KeyError) as exc:
                     arguments = {}
                     argument_error = f"{type(exc).__name__}: {exc}"
                 await _publish(
@@ -539,7 +586,7 @@ async def _run_agent(run_id: uuid.UUID) -> None:
         graph.add_edge("tools", "model")
         compiled = graph.compile()
         try:
-            async with asyncio.timeout(agent.timeout_seconds):
+            async with asyncio.timeout_at(execution_deadline):
                 final_state = await compiled.ainvoke(
                     initial_state,
                     config={"recursion_limit": agent.max_steps * 2 + 4},
